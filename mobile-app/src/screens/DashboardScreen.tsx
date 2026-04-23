@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
 import { api } from '../api/angelone';
-import { C, fmt } from '../utils/theme';
+import { C } from '../utils/theme';
 
 export default function DashboardScreen() {
   const { isLoggedIn, isHalted, setHalted, positions, setPositions, setOrders, risk } = useStore();
@@ -146,9 +146,6 @@ function Chip({ label, color }: { label: string; color: string }) {
     </View>
   );
 }
-
-// ── Theme util (inline to avoid extra file import) ────────────────────────────
-const fmt = { currency: (v: number) => `₹${Math.abs(v).toFixed(2)}` };
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },

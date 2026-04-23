@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, Alert } from 'react-native';
@@ -36,7 +36,8 @@ export default function App() {
   const notifListener = useRef<Notifications.Subscription>();
   const responseListener = useRef<Notifications.Subscription>();
 
-  const { setLoggedIn, setCredentials, setRisk, setPushToken, addSignal, setPendingSignal, risk } = useStore();
+  const { setLoggedIn, setCredentials, setRisk, setPushToken, addSignal, setPendingSignal, risk, signals } = useStore();
+  const pendingCount = signals.filter((s) => s.status === 'pending').length;
 
   // Restore session on launch
   useEffect(() => {
@@ -111,7 +112,7 @@ export default function App() {
           component={SignalsScreen}
           options={{
             tabBarIcon: ({ focused }) => <TabIcon icon="⚡" label="Signals" focused={focused} />,
-            tabBarBadge: useStore.getState().signals.filter((s) => s.status === 'pending').length || undefined,
+            tabBarBadge: pendingCount > 0 ? pendingCount : undefined,
           }}
         />
         <Tab.Screen
