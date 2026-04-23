@@ -1,0 +1,45 @@
+# ─── NEVER commit these ───────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ─── Mobile App ───────────────────────────────────────────────────────────────
+mobile-app/node_modules/
+mobile-app/.expo/
+mobile-app/dist/
+mobile-app/*.jks
+mobile-app/*.p8
+mobile-app/*.p12
+mobile-app/*.key
+mobile-app/*.mobileprovision
+mobile-app/android/
+mobile-app/ios/
+
+# ─── Cloudflare Worker ────────────────────────────────────────────────────────
+cloudflare-worker/node_modules/
+cloudflare-worker/.wrangler/
+
+# ─── OS / Editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
