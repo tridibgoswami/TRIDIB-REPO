@@ -1,0 +1,79 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// TradingView Alert Message Template
+//
+// In TradingView → Create Alert → Notifications tab → Webhook URL:
+//   http://<YOUR_SERVER_IP>:8000/webhook
+//
+// In the "Message" field, paste the JSON below (edit as needed).
+// Use TradingView placeholders like {{close}}, {{time}} etc.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── NIFTY FUTURES BUY ALERT ──────────────────────────────────────────────────
+// {
+//   "secret":       "YOUR_WEBHOOK_SECRET",
+//   "symbol":       "NIFTY",
+//   "action":       "BUY",
+//   "instrument":   "FUT",
+//   "expiry":       "29MAY2025",
+//   "strike":       0,
+//   "price":        0,
+//   "quantity":     25,
+//   "product_type": "INTRADAY",
+//   "order_type":   "MARKET"
+// }
+
+// ── NIFTY FUTURES SELL ALERT ─────────────────────────────────────────────────
+// {
+//   "secret":       "YOUR_WEBHOOK_SECRET",
+//   "symbol":       "NIFTY",
+//   "action":       "SELL",
+//   "instrument":   "FUT",
+//   "expiry":       "29MAY2025",
+//   "strike":       0,
+//   "price":        0,
+//   "quantity":     25,
+//   "product_type": "INTRADAY",
+//   "order_type":   "MARKET"
+// }
+
+// ── NIFTY CE (CALL OPTION) BUY ───────────────────────────────────────────────
+// {
+//   "secret":       "YOUR_WEBHOOK_SECRET",
+//   "symbol":       "NIFTY",
+//   "action":       "BUY",
+//   "instrument":   "CE",
+//   "expiry":       "29MAY2025",
+//   "strike":       24000,
+//   "price":        0,
+//   "quantity":     25,
+//   "product_type": "INTRADAY",
+//   "order_type":   "MARKET"
+// }
+
+// ── BANKNIFTY PE (PUT OPTION) BUY ────────────────────────────────────────────
+// {
+//   "secret":       "YOUR_WEBHOOK_SECRET",
+//   "symbol":       "BANKNIFTY",
+//   "action":       "BUY",
+//   "instrument":   "PE",
+//   "expiry":       "29MAY2025",
+//   "strike":       52000,
+//   "price":        0,
+//   "quantity":     15,
+//   "product_type": "INTRADAY",
+//   "order_type":   "MARKET"
+// }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SAMPLE PINE SCRIPT INTEGRATION
+// Add this to your existing indicator to send alerts:
+// ─────────────────────────────────────────────────────────────────────────────
+
+//@version=5
+indicator("My Signal Indicator", overlay=true)
+
+// ... your existing signal logic ...
+
+// Example: when your buy signal fires, use alertcondition():
+// alertcondition(buySignal, title="BUY Signal", message='{"secret":"YOUR_SECRET","symbol":"NIFTY","action":"BUY","instrument":"FUT","expiry":"29MAY2025","strike":0,"price":0,"quantity":25,"product_type":"INTRADAY","order_type":"MARKET"}')
+// alertcondition(sellSignal, title="SELL Signal", message='{"secret":"YOUR_SECRET","symbol":"NIFTY","action":"SELL","instrument":"FUT","expiry":"29MAY2025","strike":0,"price":0,"quantity":25,"product_type":"INTRADAY","order_type":"MARKET"}')
