@@ -169,6 +169,29 @@ sudo systemctl status trading-bot
 
 ---
 
+## 9. Mobile Control via Telegram
+
+Once the bot is running, open your Telegram app and message your bot:
+
+| Command | What it does |
+|---------|-------------|
+| `/start` | Show all available commands |
+| `/status` | Bot state, login, halt, open positions, P&L |
+| `/positions` | Live open positions with unrealized P&L |
+| `/pnl` | Today's realized + unrealized P&L |
+| `/orders` | Last 10 orders from today's order book |
+| `/squareoff` | Close all positions (asks for confirmation) |
+| `/halt` | Pause bot — no new trades accepted |
+| `/resume` | Resume trading after halt |
+| `/setlots 50` | Change default quantity to 50 |
+| `/setloss 8000` | Update daily loss limit to ₹8000 |
+| `/trade NIFTY BUY FUT 29MAY2025` | Place a manual futures trade |
+| `/trade BANKNIFTY SELL PE 29MAY2025 52000` | Place a manual options trade |
+
+> All commands only work from your configured `TELEGRAM_CHAT_ID` — no one else can control the bot.
+
+---
+
 ## Health Check
 
 ```bash

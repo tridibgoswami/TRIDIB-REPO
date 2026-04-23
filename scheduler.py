@@ -1,15 +1,12 @@
 """
-APScheduler jobs:
-  09:00 IST → login, reset state, start server
-  Every 5 min  → check daily P&L / loss limit
-  Every 30 s   → poll order fills
-  15:15 IST → auto square-off
-  15:30 IST → logout, stop server, send day summary
+APScheduler jobs (all times IST):
+  09:00 → Login AngelOne + reset daily state + Telegram "Bot Started"
+  Every 5 min → check daily P&L / loss limit
+  Every 30 s  → poll order fills
+  15:15 → auto square-off all positions
+  15:30 → logout + send day P&L summary
 """
 
-import threading
-import time
-import uvicorn
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -19,51 +16,22 @@ from config import config
 from angelone_client import angelone
 from telegram_notifier import notifier
 from trade_manager import trade_manager
-from webhook_server import app
 
 IST = pytz.timezone("Asia/Kolkata")
 
-_server_thread: threading.Thread | None = None
-_uvicorn_server: uvicorn.Server | None = None
 
-
-# ── Uvicorn lifecycle ─────────────────────────────────────────────────────────
-
-def _start_webhook_server():
-    global _uvicorn_server, _server_thread
-
-    cfg = uvicorn.Config(
-        app=app,
-        host=config.WEBHOOK_HOST,
-        port=config.WEBHOOK_PORT,
-        log_level="warning",
-    )
-    _uvicorn_server = uvicorn.Server(cfg)
-
-    _server_thread = threading.Thread(target=_uvicorn_server.run, daemon=True)
-    _server_thread.start()
-    logger.info(f"Webhook server started on {config.WEBHOOK_HOST}:{config.WEBHOOK_PORT}")
-
-
-def _stop_webhook_server():
-    global _uvicorn_server
-    if _uvicorn_server:
-        _uvicorn_server.should_exit = True
-        logger.info("Webhook server stopped")
-
-
-# ── Scheduled jobs ────────────────────────────────────────────────────────────
+# ── Jobs ──────────────────────────────────────────────────────────────────────
 
 def job_morning_start():
-    logger.info("=== BOT MORNING START ===")
+    logger.info("=== MORNING START ===")
     trade_manager.reset_daily_state()
 
     if not angelone.login():
-        notifier.error_alert("AngelOne login failed at market open. Bot inactive.")
+        notifier.error_alert("AngelOne login FAILED at market open. Bot inactive — fix credentials and /resume.")
         return
 
-    _start_webhook_server()
     notifier.bot_started()
+    logger.info("Ready to trade. Webhook server already running.")
 
 
 def job_check_pnl():
@@ -76,15 +44,14 @@ def job_check_pnl():
 
 
 def job_poll_fills():
-    """Poll order book and update fill status for tracked orders."""
+    """Update fill prices for tracked orders."""
     if not angelone._logged_in:
         return
     try:
         orders = angelone.get_order_book()
         for order in orders:
             oid = order.get("orderid")
-            ostatus = order.get("status", "").upper()
-            if ostatus == "COMPLETE" and oid in trade_manager._open_positions:
+            if order.get("status", "").upper() == "COMPLETE" and oid in trade_manager._open_positions:
                 fill_price = float(order.get("averageprice", 0))
                 trade_manager.update_fill(oid, fill_price)
     except Exception as e:
@@ -99,19 +66,18 @@ def job_square_off():
         trade_manager.square_off_all()
     except Exception as e:
         logger.error(f"Square-off error: {e}")
-        notifier.error_alert(f"Square-off failed: {e}")
+        notifier.error_alert(f"Auto square-off failed: {e}")
 
 
 def job_eod_stop():
-    logger.info("=== BOT EOD STOP ===")
+    logger.info("=== EOD STOP ===")
     pnl = trade_manager._daily_pnl
     notifier.bot_stopped(pnl)
-    _stop_webhook_server()
     angelone.logout()
-    logger.info("=== SESSION COMPLETE ===")
+    logger.info("Session complete.")
 
 
-# ── Scheduler setup ───────────────────────────────────────────────────────────
+# ── Build ─────────────────────────────────────────────────────────────────────
 
 def build_scheduler() -> BackgroundScheduler:
     sq_h, sq_m = config.SQUARE_OFF_TIME.split(":")
