@@ -21,11 +21,12 @@ export default function SignalsScreen() {
       return Alert.alert('Max positions', `Limit is ${risk.maxOpenPositions}. Square off first.`);
 
     setExecuting(signal.id);
-    const scrip = await api.searchScrip('NFO', signal.tradingSymbol);
+    const exchange = signal.instrument === 'FUT' || signal.instrument === 'CE' || signal.instrument === 'PE' ? 'NFO' : 'NSE';
+    const scrip = await api.searchScrip(exchange, signal.tradingSymbol);
     if (!scrip) {
-      updateSignal(signal.id, { status: 'failed', errorMessage: 'Symbol not found on NSE' });
+      updateSignal(signal.id, { status: 'failed', errorMessage: `Symbol not found: ${signal.tradingSymbol}` });
       setExecuting(null);
-      return Alert.alert('Symbol Not Found', signal.tradingSymbol);
+      return Alert.alert('Symbol Not Found', `"${signal.tradingSymbol}" not on ${exchange}. Check the alert JSON.`);
     }
 
     const result = await api.placeOrder({
@@ -36,6 +37,7 @@ export default function SignalsScreen() {
       orderType: signal.orderType,
       price: signal.price,
       productType: signal.productType,
+      exchange,
     });
     setExecuting(null);
 

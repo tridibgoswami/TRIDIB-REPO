@@ -41,27 +41,37 @@ export async function registerForPushNotifications(): Promise<string | null> {
 // Parse the push notification data into a TradeSignal
 export function parseSignalFromNotification(data: Record<string, any>): TradeSignal | null {
   try {
-    const sym = data.symbol?.toUpperCase();
-    const inst = data.instrument?.toUpperCase() ?? 'FUT';
+    const inst = (data.instrument?.toUpperCase() ?? 'FUT') as TradeSignal['instrument'];
     const expiry = data.expiry?.toUpperCase() ?? '';
     const strike = parseInt(data.strike ?? '0', 10);
 
-    let tradingSymbol = `${sym}${expiry}FUT`;
-    if (inst === 'CE' || inst === 'PE') {
+    // Prefer trading_symbol sent by Cloudflare Worker (sourced from {{ticker}} in TradingView).
+    // That gives the exact AngelOne-compatible symbol e.g. "NIFTY25APR24FUT" — no extra parsing needed.
+    let sym = data.symbol?.toUpperCase() ?? '';
+    let tradingSymbol: string;
+    if (data.trading_symbol) {
+      tradingSymbol = String(data.trading_symbol).toUpperCase();
+      if (!sym) sym = tradingSymbol.replace(/\d.*/, ''); // extract root if symbol missing
+    } else if (inst === 'CE' || inst === 'PE') {
       tradingSymbol = `${sym}${expiry}${String(strike).padStart(5, '0')}${inst}`;
+    } else {
+      tradingSymbol = `${sym}${expiry}FUT`;
     }
+
+    // Default quantity per instrument if not provided by the alert
+    const defaultQty = sym.startsWith('BANKNIFTY') ? 15 : sym.startsWith('NIFTY') ? 75 : 1;
 
     return {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       symbol: sym,
-      action: data.action?.toUpperCase() ?? 'BUY',
+      action: (data.action?.toUpperCase() ?? 'BUY') as TradeSignal['action'],
       instrument: inst,
       expiry,
       strike,
       price: parseFloat(data.price ?? '0'),
-      quantity: parseInt(data.quantity ?? '25', 10),
-      orderType: data.order_type?.toUpperCase() ?? 'MARKET',
-      productType: data.product_type?.toUpperCase() ?? 'INTRADAY',
+      quantity: parseInt(data.quantity ?? String(defaultQty), 10),
+      orderType: (data.order_type?.toUpperCase() ?? 'MARKET') as TradeSignal['orderType'],
+      productType: (data.product_type?.toUpperCase() ?? 'INTRADAY') as TradeSignal['productType'],
       tradingSymbol,
       receivedAt: new Date().toISOString(),
       status: 'pending',

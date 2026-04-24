@@ -39,13 +39,17 @@ export default {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { symbol, action, instrument, expiry, strike, quantity, price, order_type, product_type } = body;
+    const { symbol, action, instrument, expiry, strike, quantity, price, order_type, product_type, trading_symbol } = body;
+
+    // trading_symbol from {{ticker}} in TradingView (e.g. "NIFTY25APR24FUT")
+    // Strip exchange prefix if present (e.g. "NSE:NIFTY25APR24FUT" → "NIFTY25APR24FUT")
+    const cleanTradingSymbol = trading_symbol ? String(trading_symbol).replace(/^[A-Z]+:/, '') : undefined;
 
     // Build a human-readable notification title
     const actionEmoji = action === 'BUY' ? '🟢' : '🔴';
-    const inst = instrument === 'FUT' ? 'Futures' : `${strike} ${instrument}`;
-    const title = `${actionEmoji} ${action} ${symbol} ${inst}`;
-    const body_text = `${quantity} lots • ${order_type ?? 'MARKET'} • ${product_type ?? 'INTRADAY'} • ${expiry}`;
+    const displaySym = cleanTradingSymbol ?? `${symbol ?? '?'} ${instrument === 'FUT' ? 'Futures' : `${strike ?? ''} ${instrument ?? ''}`}`;
+    const title = `${actionEmoji} ${action} ${displaySym}`;
+    const body_text = `${quantity} lots • ${order_type ?? 'MARKET'} • ${product_type ?? 'INTRADAY'}`;
 
     // Send Expo push notification
     const pushPayload = {
@@ -54,7 +58,7 @@ export default {
       priority: 'high',
       title,
       body: body_text,
-      data: { symbol, action, instrument, expiry, strike, quantity, price, order_type, product_type },
+      data: { symbol, action, instrument, expiry, strike, quantity, price, order_type, product_type, trading_symbol: cleanTradingSymbol },
       channelId: 'signals',
     };
 
