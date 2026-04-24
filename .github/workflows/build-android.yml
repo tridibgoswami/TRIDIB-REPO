@@ -1,7 +1,7 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch:       # ← lets you trigger this manually from GitHub on your phone
+  workflow_dispatch:
 
 jobs:
   build:
@@ -27,9 +27,11 @@ jobs:
         working-directory: mobile-app
         run: npm install
 
+      - name: Verify Expo login
+        run: eas whoami
+
       - name: Build Android APK
         working-directory: mobile-app
         run: eas build -p android --profile preview --non-interactive
-
-      - name: Done
-        run: echo "✅ Build complete! Check https://expo.dev for your APK download link."
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
