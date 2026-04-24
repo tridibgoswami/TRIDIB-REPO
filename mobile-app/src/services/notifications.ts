@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { Storage } from './storage';
 import { TradeSignal } from '../types';
 
@@ -33,7 +34,12 @@ export async function registerForPushNotifications(): Promise<string | null> {
     });
   }
 
-  const token = (await Notifications.getExpoPushTokenAsync()).data;
+  // projectId is required in Expo SDK 50+ for EAS builds
+  const projectId =
+    Constants.easConfig?.projectId ??
+    Constants.expoConfig?.extra?.eas?.projectId;
+
+  const token = (await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {})).data;
   await Storage.savePushToken(token);
   return token;
 }
