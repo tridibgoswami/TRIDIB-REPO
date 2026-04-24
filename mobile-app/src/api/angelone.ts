@@ -48,7 +48,18 @@ class AngelOneAPI {
       const resp = await this.client.post(
         '/rest/auth/angelbroking/user/v1/loginByPassword',
         { clientcode: creds.clientId, password: creds.password, totp },
-        { headers: { 'Content-Type': 'application/json', 'X-PrivateKey': creds.apiKey } }
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-PrivateKey': creds.apiKey,
+            'X-UserType': 'USER',
+            'X-SourceID': 'WEB',
+            'X-ClientLocalIP': '127.0.0.1',
+            'X-ClientPublicIP': '127.0.0.1',
+            'X-MACAddress': '00:00:00:00:00:00',
+          },
+        }
       );
 
       if (resp.data?.status && resp.data?.data?.jwtToken) {
