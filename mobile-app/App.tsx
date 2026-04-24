@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, Alert } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 
@@ -91,6 +92,7 @@ export default function App() {
   }, [risk.autoExecute]);
 
   return (
+    <SafeAreaProvider>
     <NavigationContainer theme={DARK_NAV_THEME}>
       <StatusBar style="light" backgroundColor={C.bg} />
       <Tab.Navigator
@@ -132,5 +134,6 @@ export default function App() {
         />
       </Tab.Navigator>
     </NavigationContainer>
+    </SafeAreaProvider>
   );
 }

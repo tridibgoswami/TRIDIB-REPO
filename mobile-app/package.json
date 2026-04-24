@@ -9,8 +9,6 @@
     "build:android": "eas build -p android --profile preview"
   },
   "dependencies": {
-    "@otplib/core": "^12.0.1",
-    "@otplib/plugin-crypto-js": "^12.0.1",
     "@react-navigation/bottom-tabs": "^6.5.20",
     "@react-navigation/native": "^6.1.17",
     "@react-navigation/native-stack": "^6.9.26",

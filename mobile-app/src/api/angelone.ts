@@ -1,14 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
-import { authenticator } from '@otplib/core';
-import { createCryptoJS } from '@otplib/plugin-crypto-js';
 import CryptoJS from 'crypto-js';
+import { generateTOTP } from '../utils/totp';
 import { Credentials, Position, Order, ActionType, OrderType, ProductType } from '../types';
 import { Storage } from '../services/storage';
-
-const BASE = 'https://apiconnect.angelone.in';
-
-// Wire otplib to use crypto-js (works in React Native)
-authenticator.options = { crypto: createCryptoJS(CryptoJS), digits: 6, step: 30 };
 
 export interface PlaceOrderParams {
   symbolToken: string;
@@ -48,7 +42,7 @@ class AngelOneAPI {
   async login(creds: Credentials): Promise<{ success: boolean; error?: string }> {
     try {
       this.apiKey = creds.apiKey;
-      const totp = authenticator.generate(creds.totpSecret.replace(/\s/g, ''));
+      const totp = generateTOTP(creds.totpSecret);
 
       const resp = await this.client.post(
         '/rest/auth/angelbroking/user/v1/loginByPassword',
