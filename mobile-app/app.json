@@ -41,8 +41,7 @@
           "android": {
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
-            "minSdkVersion": 24,
-            "buildToolsVersion": "34.0.0"
+            "minSdkVersion": 24
           }
         }
       ]
