@@ -30,6 +30,12 @@ jobs:
       - name: Verify Expo login
         run: eas whoami
 
+      - name: Register project with Expo (first time only)
+        working-directory: mobile-app
+        run: eas init --non-interactive --force
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
       - name: Build Android APK
         working-directory: mobile-app
         run: eas build -p android --profile preview --non-interactive
