@@ -1,8 +1,9 @@
 import axios, { AxiosInstance } from 'axios';
-import CryptoJS from 'crypto-js';
 import { generateTOTP } from '../utils/totp';
 import { Credentials, Position, Order, ActionType, OrderType, ProductType } from '../types';
 import { Storage } from '../services/storage';
+
+const BASE = 'https://apiconnect.angelone.in';
 
 export interface PlaceOrderParams {
   symbolToken: string;
