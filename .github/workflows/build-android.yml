@@ -38,6 +38,6 @@ jobs:
 
       - name: Build Android APK
         working-directory: mobile-app
-        run: eas build -p android --profile preview --non-interactive
+        run: eas build -p android --profile preview --non-interactive --output /tmp/app.apk 2>&1 || eas build -p android --profile preview --non-interactive 2>&1
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
