@@ -38,6 +38,13 @@ jobs:
 
       - name: Build Android APK
         working-directory: mobile-app
-        run: eas build -p android --profile preview --non-interactive --output /tmp/app.apk 2>&1 || eas build -p android --profile preview --non-interactive 2>&1
+        run: eas build -p android --profile preview --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build complete
+        run: |
+          echo "================================================"
+          echo "✅ Build submitted! Download APK from expo.dev"
+          echo "👉 expo.dev/accounts/tridibgoswami/projects/algo-trader/builds"
+          echo "================================================"
