@@ -11,13 +11,6 @@
       "resizeMode": "contain",
       "backgroundColor": "#0d1117"
     },
-    "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.tridib.algotrader",
-      "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
-      }
-    },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -27,24 +20,7 @@
       "permissions": ["RECEIVE_BOOT_COMPLETED", "VIBRATE"]
     },
     "plugins": [
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#00c853",
-          "androidMode": "default"
-        }
-      ],
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "compileSdkVersion": 34,
-            "targetSdkVersion": 34,
-            "minSdkVersion": 24
-          }
-        }
-      ]
+      "expo-notifications"
     ],
     "extra": {
       "eas": {}
