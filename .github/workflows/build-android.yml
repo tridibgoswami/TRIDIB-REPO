@@ -38,6 +38,14 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Show Expo project ID (copy this into app.json)
+        working-directory: mobile-app
+        run: |
+          echo "================================================"
+          echo "EXPO PROJECT ID:"
+          cat app.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('expo',{}).get('extra',{}).get('eas',{}).get('projectId','NOT FOUND'))"
+          echo "================================================"
+
       - name: Build Android APK
         working-directory: mobile-app
         run: eas build -p android --profile preview --non-interactive

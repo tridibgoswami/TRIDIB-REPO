@@ -171,14 +171,18 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[s.btn, { backgroundColor: C.blue, marginTop: 8 }]}
               onPress={async () => {
-                const { registerForPushNotifications } = require('../services/notifications');
-                const token = await registerForPushNotifications();
-                if (token) {
-                  const { useStore: store } = require('../store/useStore');
-                  store.getState().setPushToken(token);
-                  Alert.alert('✅ Token registered', token);
-                } else {
-                  Alert.alert('Failed', 'Could not get push token. Make sure notifications are allowed in phone Settings.');
+                try {
+                  const notifs = require('../services/notifications');
+                  const token = await notifs.registerForPushNotifications();
+                  if (token) {
+                    const { useStore: storeModule } = require('../store/useStore');
+                    storeModule.getState().setPushToken(token);
+                    Alert.alert('✅ Token registered', token);
+                  } else {
+                    Alert.alert('Failed', 'Token came back empty. Go to phone Settings → Apps → AlgoTrader → Notifications → turn ON.');
+                  }
+                } catch (e: any) {
+                  Alert.alert('Error', String(e?.message ?? e));
                 }
               }}
             >
