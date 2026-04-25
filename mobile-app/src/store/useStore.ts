@@ -42,7 +42,7 @@ export const useStore = create<AppState>((set) => ({
   risk: {
     maxDailyLoss: 5000,
     maxOpenPositions: 2,
-    defaultQuantity: 75, // NIFTY 1 lot = 75 units; BANKNIFTY 1 lot = 15 units
+    defaultQuantity: 65, // NIFTY 1 lot = 65 units; BANKNIFTY 1 lot = 30 units
     autoExecute: false,
     squareOffTime: '15:15',
   },

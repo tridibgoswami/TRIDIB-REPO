@@ -65,7 +65,7 @@ export function parseSignalFromNotification(data: Record<string, any>): TradeSig
     }
 
     // Default quantity per instrument if not provided by the alert
-    const defaultQty = sym.startsWith('BANKNIFTY') ? 15 : sym.startsWith('NIFTY') ? 75 : 1;
+    const defaultQty = sym.startsWith('BANKNIFTY') ? 30 : sym.startsWith('NIFTY') ? 65 : 1;
 
     return {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
