@@ -9,6 +9,7 @@ import { api } from '../api/angelone';
 import { Storage } from '../services/storage';
 import { Credentials, RiskSettings } from '../types';
 import { C } from '../utils/theme';
+import { generateTOTP } from '../utils/totp';
 
 export default function SettingsScreen() {
   const { credentials, setCredentials, risk, setRisk, isLoggedIn, setLoggedIn, pushToken } = useStore();
@@ -19,11 +20,27 @@ export default function SettingsScreen() {
   const [riskLocal, setRiskLocal] = useState<RiskSettings>(risk);
   const [loading, setLoading] = useState(false);
   const [showCreds, setShowCreds] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
+  const [totpSecondsLeft, setTotpSecondsLeft] = useState(30);
 
   useEffect(() => {
     Storage.getCredentials().then((c) => { if (c) setCreds(c); });
     Storage.getRisk().then(setRiskLocal);
   }, []);
+
+  // Refresh TOTP every second when secret is available
+  useEffect(() => {
+    if (!creds.totpSecret) return;
+    const refresh = () => {
+      try {
+        setTotpCode(generateTOTP(creds.totpSecret));
+        setTotpSecondsLeft(30 - (Math.floor(Date.now() / 1000) % 30));
+      } catch (_) { setTotpCode('ERROR'); }
+    };
+    refresh();
+    const id = setInterval(refresh, 1000);
+    return () => clearInterval(id);
+  }, [creds.totpSecret]);
 
   const handleConnect = async () => {
     if (!creds.apiKey || !creds.clientId || !creds.password || !creds.totpSecret) {
@@ -77,6 +94,17 @@ export default function SettingsScreen() {
           <TouchableOpacity onPress={() => setShowCreds(!showCreds)} style={s.toggle}>
             <Text style={s.toggleText}>{showCreds ? '🙈 Hide' : '👁 Show'} credentials</Text>
           </TouchableOpacity>
+
+          {creds.totpSecret ? (
+            <View style={s.totpBox}>
+              <Text style={s.totpLabel}>Live TOTP Code (compare with Google Authenticator)</Text>
+              <View style={s.totpRow}>
+                <Text style={s.totpCode}>{totpCode}</Text>
+                <Text style={s.totpTimer}>{totpSecondsLeft}s</Text>
+              </View>
+              <Text style={s.hint}>If this matches your Authenticator app → TOTP secret is correct</Text>
+            </View>
+          ) : null}
 
           {isLoggedIn
             ? <TouchableOpacity style={[s.btn, { backgroundColor: C.red }]} onPress={handleDisconnect}>
@@ -197,4 +225,9 @@ const s = StyleSheet.create({
   btnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   tokenBox: { backgroundColor: C.bg, borderRadius: 8, padding: 12, borderWidth: 1, borderColor: C.border, marginBottom: 8 },
   tokenText: { color: C.blue, fontSize: 11, fontFamily: 'monospace' },
+  totpBox: { backgroundColor: '#0d1f12', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: C.green, marginBottom: 12 },
+  totpLabel: { color: C.muted, fontSize: 11, marginBottom: 6 },
+  totpRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  totpCode: { color: C.green, fontSize: 28, fontWeight: '700', fontFamily: 'monospace', letterSpacing: 4 },
+  totpTimer: { color: C.muted, fontSize: 13 },
 });
