@@ -14,41 +14,37 @@ Notifications.setNotificationHandler({
 });
 
 export async function registerForPushNotifications(): Promise<string | null> {
-  try {
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let finalStatus = existing;
+  const { status: existing } = await Notifications.getPermissionsAsync();
+  let finalStatus = existing;
 
-    if (existing !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-
-    if (finalStatus !== 'granted') return null;
-
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('signals', {
-        name: 'Trade Signals',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#00c853',
-        sound: 'default',
-      });
-    }
-
-    const projectId =
-      Constants.easConfig?.projectId ??
-      (Constants.expoConfig?.extra as any)?.eas?.projectId;
-
-    const tokenData = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : {}
-    );
-    const token = tokenData.data;
-    await Storage.savePushToken(token);
-    return token;
-  } catch (e) {
-    console.warn('Push token registration failed:', e);
-    return null;
+  if (existing !== 'granted') {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
   }
+
+  if (finalStatus !== 'granted') return null;
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('signals', {
+      name: 'Trade Signals',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#00c853',
+      sound: 'default',
+    });
+  }
+
+  const projectId =
+    Constants.easConfig?.projectId ??
+    (Constants.expoConfig?.extra as any)?.eas?.projectId;
+
+  // Do NOT catch — let the real error bubble up to the caller so it can be displayed
+  const tokenData = await Notifications.getExpoPushTokenAsync(
+    projectId ? { projectId } : {}
+  );
+  const token = tokenData.data;
+  await Storage.savePushToken(token);
+  return token;
 }
 
 // Parse the push notification data into a TradeSignal
