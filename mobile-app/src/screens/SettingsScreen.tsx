@@ -161,11 +161,30 @@ export default function SettingsScreen() {
 
         {/* Push Token (for Cloudflare Worker config) */}
         <Section title="Cloudflare Worker Setup">
-          <Text style={s.hint}>Copy this token into your Cloudflare Worker environment variable.</Text>
+          <Text style={s.hint}>Copy this token into your Cloudflare Worker Secrets as EXPO_PUSH_TOKEN.</Text>
           <View style={s.tokenBox}>
-            <Text style={s.tokenText} selectable>{pushToken || 'Not registered yet — restart app'}</Text>
+            <Text style={s.tokenText} selectable>
+              {pushToken || 'Not registered yet'}
+            </Text>
           </View>
-          <Text style={s.hint}>Set as: EXPO_PUSH_TOKEN in wrangler.toml or via "wrangler secret put"</Text>
+          {!pushToken && (
+            <TouchableOpacity
+              style={[s.btn, { backgroundColor: C.blue, marginTop: 8 }]}
+              onPress={async () => {
+                const { registerForPushNotifications } = require('../services/notifications');
+                const token = await registerForPushNotifications();
+                if (token) {
+                  const { useStore: store } = require('../store/useStore');
+                  store.getState().setPushToken(token);
+                  Alert.alert('✅ Token registered', token);
+                } else {
+                  Alert.alert('Failed', 'Could not get push token. Make sure notifications are allowed in phone Settings.');
+                }
+              }}
+            >
+              <Text style={s.btnText}>Retry Token Registration</Text>
+            </TouchableOpacity>
+          )}
         </Section>
       </ScrollView>
     </SafeAreaView>
