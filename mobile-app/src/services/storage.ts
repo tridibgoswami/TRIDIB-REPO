@@ -25,11 +25,16 @@ export const Storage = {
 
   async getRisk(): Promise<RiskSettings> {
     const val = await SecureStore.getItemAsync(KEYS.RISK);
-    if (val) return JSON.parse(val);
+    if (val) {
+      const parsed = JSON.parse(val) as RiskSettings;
+      // Migrate old default quantity (25) to correct lot size (65 = 1 NIFTY lot)
+      if (parsed.defaultQuantity === 25) parsed.defaultQuantity = 65;
+      return parsed;
+    }
     return {
       maxDailyLoss: 5000,
       maxOpenPositions: 2,
-      defaultQuantity: 25,
+      defaultQuantity: 65,
       autoExecute: false,
       squareOffTime: '15:15',
     };
