@@ -13,14 +13,37 @@ export default function SignalsScreen() {
   const { signals, updateSignal, isLoggedIn, isHalted, positions, risk } = useStore();
   const [executing, setExecuting] = useState<string | null>(null);
 
+  const EXIT_TYPES = ['EXIT_BUY', 'EXIT_SELL', 'TRAIL_STOP_BUY', 'TRAIL_STOP_SELL', 'EOD_EXIT'];
+
   const execute = async (signal: TradeSignal) => {
     if (!isLoggedIn) return Alert.alert('Not connected', 'Log in first from Settings.');
     if (isHalted) return Alert.alert('Bot halted', 'Resume from Dashboard first.');
-    const openCount = positions.filter((p) => parseInt(p.netqty, 10) !== 0).length;
-    if (openCount >= risk.maxOpenPositions)
-      return Alert.alert('Max positions', `Limit is ${risk.maxOpenPositions}. Square off first.`);
+
+    const isExit = EXIT_TYPES.includes(signal.signalType);
+
+    // Only enforce max positions for new entries, not exits
+    if (!isExit) {
+      const openCount = positions.filter((p) => parseInt(p.netqty, 10) !== 0).length;
+      if (openCount >= risk.maxOpenPositions)
+        return Alert.alert('Max positions', `Limit is ${risk.maxOpenPositions}. Square off first.`);
+    }
 
     setExecuting(signal.id);
+
+    // EOD Exit — square off all open positions
+    if (signal.signalType === 'EOD_EXIT') {
+      const orderIds = await api.squareOffAll();
+      setExecuting(null);
+      if (orderIds.length > 0) {
+        updateSignal(signal.id, { status: 'executed', orderId: orderIds.join(',') });
+        Alert.alert('✅ Squared Off', `${orderIds.length} position(s) closed.`);
+      } else {
+        updateSignal(signal.id, { status: 'dismissed', errorMessage: 'No open positions to close' });
+        Alert.alert('Nothing to close', 'No open positions found.');
+      }
+      return;
+    }
+
     const exchange = signal.instrument === 'FUT' || signal.instrument === 'CE' || signal.instrument === 'PE' ? 'NFO' : 'NSE';
     const scrip = await api.searchScrip(exchange, signal.tradingSymbol);
     if (!scrip) {
@@ -50,14 +73,26 @@ export default function SignalsScreen() {
     }
   };
 
+  const SIGNAL_LABELS: Record<string, string> = {
+    BUY: '▲ BUY',
+    SELL: '▼ SELL',
+    EXIT_BUY: '▲ EXIT BUY',
+    EXIT_SELL: '▼ EXIT SELL',
+    TRAIL_STOP_BUY: '▲ TRAIL STOP',
+    TRAIL_STOP_SELL: '▼ TRAIL STOP',
+    EOD_EXIT: '⬛ EOD EXIT',
+  };
+
   const renderSignal = ({ item }: { item: TradeSignal }) => {
     const isBuy = item.action === 'BUY';
     const isPending = item.status === 'pending';
+    const isEodExit = item.signalType === 'EOD_EXIT';
+    const labelColor = isEodExit ? C.yellow : isBuy ? C.green : C.red;
     return (
-      <View style={[s.card, { borderLeftColor: isBuy ? C.green : C.red }]}>
+      <View style={[s.card, { borderLeftColor: labelColor }]}>
         <View style={s.cardTop}>
-          <Text style={[s.action, { color: isBuy ? C.green : C.red }]}>
-            {isBuy ? '▲' : '▼'} {item.action}
+          <Text style={[s.action, { color: labelColor }]}>
+            {SIGNAL_LABELS[item.signalType] ?? (isBuy ? '▲ BUY' : '▼ SELL')}
           </Text>
           <StatusBadge status={item.status} />
         </View>

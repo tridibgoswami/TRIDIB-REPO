@@ -2,7 +2,9 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { Storage } from './storage';
-import { TradeSignal } from '../types';
+import { TradeSignal, SignalType } from '../types';
+
+const VALID_SIGNAL_TYPES: SignalType[] = ['BUY', 'SELL', 'EXIT_BUY', 'EXIT_SELL', 'TRAIL_STOP_BUY', 'TRAIL_STOP_SELL', 'EOD_EXIT'];
 
 // Show notifications even when app is in foreground
 Notifications.setNotificationHandler({
@@ -70,10 +72,23 @@ export function parseSignalFromNotification(data: Record<string, any>): TradeSig
     // Default quantity per instrument if not provided by the alert
     const defaultQty = sym.startsWith('BANKNIFTY') ? 30 : sym.startsWith('NIFTY') ? 65 : 1;
 
+    const rawType = (data.signal_type as string | undefined)?.toUpperCase() as SignalType | undefined;
+    const signalType: SignalType = rawType && VALID_SIGNAL_TYPES.includes(rawType)
+      ? rawType
+      : ((data.action?.toUpperCase() === 'SELL' ? 'SELL' : 'BUY') as SignalType);
+
+    // Derive transaction action from signal type
+    const exitSellTypes: SignalType[] = ['EXIT_BUY', 'TRAIL_STOP_BUY'];
+    const exitBuyTypes: SignalType[] = ['EXIT_SELL', 'TRAIL_STOP_SELL'];
+    let action: TradeSignal['action'] = (data.action?.toUpperCase() ?? 'BUY') as TradeSignal['action'];
+    if (exitSellTypes.includes(signalType)) action = 'SELL';
+    else if (exitBuyTypes.includes(signalType)) action = 'BUY';
+
     return {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       symbol: sym,
-      action: (data.action?.toUpperCase() ?? 'BUY') as TradeSignal['action'],
+      signalType,
+      action,
       instrument: inst,
       expiry,
       strike,

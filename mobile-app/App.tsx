@@ -69,8 +69,11 @@ export default function App() {
       addSignal(signal);
 
       if (risk.autoExecute) {
-        setPendingSignal(signal);
-        // Auto-execute handled in SignalsScreen on mount
+        if (signal.signalType === 'EOD_EXIT') {
+          api.squareOffAll();
+        } else {
+          setPendingSignal(signal);
+        }
       }
     });
 

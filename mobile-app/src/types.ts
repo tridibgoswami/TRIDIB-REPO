@@ -18,10 +18,12 @@ export type ActionType = 'BUY' | 'SELL';
 export type OrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
 export type ProductType = 'INTRADAY' | 'DELIVERY' | 'CARRYFORWARD';
 export type SignalStatus = 'pending' | 'executed' | 'dismissed' | 'failed';
+export type SignalType = 'BUY' | 'SELL' | 'EXIT_BUY' | 'EXIT_SELL' | 'TRAIL_STOP_BUY' | 'TRAIL_STOP_SELL' | 'EOD_EXIT';
 
 export interface TradeSignal {
   id: string;
   symbol: string;
+  signalType: SignalType;
   action: ActionType;
   instrument: InstrumentType;
   expiry: string;
