@@ -4,7 +4,15 @@ import Constants from 'expo-constants';
 import { Storage } from './storage';
 import { TradeSignal, SignalType } from '../types';
 
-const VALID_SIGNAL_TYPES: SignalType[] = ['BUY', 'SELL', 'EXIT_BUY', 'EXIT_SELL', 'TRAIL_STOP_BUY', 'TRAIL_STOP_SELL', 'EOD_EXIT'];
+const VALID_SIGNAL_TYPES: SignalType[] = [
+  'BUY', 'SELL',
+  'EXIT_BUY', 'EXIT_SELL',
+  'BUY_TARGET', 'SELL_TARGET',
+  'TRAIL_STOP_BUY', 'TRAIL_STOP_SELL',
+  'EXIT_BUY_EARLY', 'EXIT_SELL_EARLY',
+  'FORCE_EXIT_BUY', 'FORCE_EXIT_SELL',
+  'EOD_EXIT',
+];
 
 // Show notifications even when app is in foreground
 Notifications.setNotificationHandler({
@@ -77,9 +85,10 @@ export function parseSignalFromNotification(data: Record<string, any>): TradeSig
       ? rawType
       : ((data.action?.toUpperCase() === 'SELL' ? 'SELL' : 'BUY') as SignalType);
 
-    // Derive transaction action from signal type
-    const exitSellTypes: SignalType[] = ['EXIT_BUY', 'TRAIL_STOP_BUY'];
-    const exitBuyTypes: SignalType[] = ['EXIT_SELL', 'TRAIL_STOP_SELL'];
+    // Exit-buy signals close a long position → SELL order
+    // Exit-sell signals close a short position → BUY order
+    const exitSellTypes: SignalType[] = ['EXIT_BUY', 'BUY_TARGET', 'TRAIL_STOP_BUY', 'EXIT_BUY_EARLY', 'FORCE_EXIT_BUY'];
+    const exitBuyTypes: SignalType[] = ['EXIT_SELL', 'SELL_TARGET', 'TRAIL_STOP_SELL', 'EXIT_SELL_EARLY', 'FORCE_EXIT_SELL'];
     let action: TradeSignal['action'] = (data.action?.toUpperCase() ?? 'BUY') as TradeSignal['action'];
     if (exitSellTypes.includes(signalType)) action = 'SELL';
     else if (exitBuyTypes.includes(signalType)) action = 'BUY';

@@ -13,7 +13,7 @@ export default function SignalsScreen() {
   const { signals, updateSignal, isLoggedIn, isHalted, positions, risk } = useStore();
   const [executing, setExecuting] = useState<string | null>(null);
 
-  const EXIT_TYPES = ['EXIT_BUY', 'EXIT_SELL', 'TRAIL_STOP_BUY', 'TRAIL_STOP_SELL', 'EOD_EXIT'];
+  const EXIT_TYPES = ['EXIT_BUY', 'EXIT_SELL', 'BUY_TARGET', 'SELL_TARGET', 'TRAIL_STOP_BUY', 'TRAIL_STOP_SELL', 'EXIT_BUY_EARLY', 'EXIT_SELL_EARLY', 'FORCE_EXIT_BUY', 'FORCE_EXIT_SELL', 'EOD_EXIT'];
 
   const execute = async (signal: TradeSignal) => {
     if (!isLoggedIn) return Alert.alert('Not connected', 'Log in first from Settings.');
@@ -74,13 +74,19 @@ export default function SignalsScreen() {
   };
 
   const SIGNAL_LABELS: Record<string, string> = {
-    BUY: '▲ BUY',
-    SELL: '▼ SELL',
-    EXIT_BUY: '▲ EXIT BUY',
-    EXIT_SELL: '▼ EXIT SELL',
-    TRAIL_STOP_BUY: '▲ TRAIL STOP',
-    TRAIL_STOP_SELL: '▼ TRAIL STOP',
-    EOD_EXIT: '⬛ EOD EXIT',
+    BUY:              '▲ BUY',
+    SELL:             '▼ SELL',
+    EXIT_BUY:         '▲ EXIT BUY',
+    EXIT_SELL:        '▼ EXIT SELL',
+    BUY_TARGET:       '🎯 BUY TARGET',
+    SELL_TARGET:      '🎯 SELL TARGET',
+    TRAIL_STOP_BUY:   '▲ TRAIL STOP BUY',
+    TRAIL_STOP_SELL:  '▼ TRAIL STOP SELL',
+    EXIT_BUY_EARLY:   '▲ EARLY EXIT BUY',
+    EXIT_SELL_EARLY:  '▼ EARLY EXIT SELL',
+    FORCE_EXIT_BUY:   '⏰ FORCE EXIT BUY',
+    FORCE_EXIT_SELL:  '⏰ FORCE EXIT SELL',
+    EOD_EXIT:         '⬛ EOD EXIT',
   };
 
   const renderSignal = ({ item }: { item: TradeSignal }) => {
