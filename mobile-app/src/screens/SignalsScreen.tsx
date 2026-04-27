@@ -103,6 +103,9 @@ export default function SignalsScreen() {
           <StatusBadge status={item.status} />
         </View>
         <Text style={s.symbol}>{item.tradingSymbol}</Text>
+        {item.price > 0 && (
+          <Text style={[s.entryPrice, { color: labelColor }]}>@ ₹{item.price.toFixed(2)}</Text>
+        )}
         <View style={s.row}>
           <Detail label="Qty" value={String(item.quantity)} />
           <Detail label="Type" value={item.orderType} />
@@ -184,7 +187,8 @@ const s = StyleSheet.create({
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   action: { fontSize: 15, fontWeight: '700' },
   badge: { fontSize: 11, fontWeight: '700' },
-  symbol: { color: C.text, fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  symbol: { color: C.text, fontSize: 18, fontWeight: '700', marginBottom: 2 },
+  entryPrice: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
   row: { flexDirection: 'row', flexWrap: 'wrap' },
   detailLabel: { color: C.muted, fontSize: 10 },
   detailValue: { color: C.text, fontSize: 13, fontWeight: '600' },
