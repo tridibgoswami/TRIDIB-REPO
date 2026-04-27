@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    name: Build APK on Expo servers
+    name: Build APK on GitHub Actions runner
     runs-on: ubuntu-latest
 
     steps:
@@ -19,6 +19,12 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Setup Expo & EAS
         uses: expo/expo-github-action@v8
         with:
@@ -29,15 +35,17 @@ jobs:
         working-directory: mobile-app
         run: npm install
 
-      - name: Build Android APK
+      - name: Build Android APK (local — no EAS quota used)
         working-directory: mobile-app
-        run: eas build -p android --profile preview --non-interactive
+        run: eas build -p android --profile preview --non-interactive --local --output ./AlgoTrader.apk
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
-      - name: Build complete
-        run: |
-          echo "================================================"
-          echo "✅ Build submitted! Download APK from expo.dev"
-          echo "👉 expo.dev/accounts/tridibgoswami/projects/algo-trader/builds"
-          echo "================================================"
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlgoTrader-v1.1.0
+          path: mobile-app/AlgoTrader.apk
+          retention-days: 30
