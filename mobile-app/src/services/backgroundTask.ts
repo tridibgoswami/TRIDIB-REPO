@@ -46,7 +46,7 @@ export async function autoExecuteSignal(
 // Defined at module level — required by expo-task-manager
 TaskManager.defineTask(
   BACKGROUND_NOTIFICATION_TASK,
-  async ({ data, error }: TaskManager.TaskManagerTaskBody) => {
+  async ({ data, error }: { data: unknown; error: TaskManager.TaskManagerError | null }) => {
     if (error) return;
 
     const notification = (data as any).notification as Notifications.Notification;
