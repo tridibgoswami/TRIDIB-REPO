@@ -13,6 +13,7 @@ import OrdersScreen from './src/screens/OrdersScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 
 import { registerForPushNotifications, parseSignalFromNotification } from './src/services/notifications';
+import { BACKGROUND_NOTIFICATION_TASK, autoExecuteSignal } from './src/services/backgroundTask';
 import { Storage } from './src/services/storage';
 import { api } from './src/api/angelone';
 import { useStore } from './src/store/useStore';
@@ -37,7 +38,7 @@ export default function App() {
   const notifListener = useRef<Notifications.Subscription>();
   const responseListener = useRef<Notifications.Subscription>();
 
-  const { setLoggedIn, setCredentials, setRisk, setPushToken, addSignal, setPendingSignal, risk, signals } = useStore();
+  const { setLoggedIn, setCredentials, setRisk, setPushToken, addSignal, updateSignal, risk, signals } = useStore();
   const pendingCount = signals.filter((s) => s.status === 'pending').length;
 
   // Restore session on launch
@@ -54,14 +55,18 @@ export default function App() {
       }
 
       const token = await registerForPushNotifications();
-      if (token) setPushToken(token);
+      if (token) {
+        setPushToken(token);
+        // Register background task so trades execute even when app is not in foreground
+        Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK).catch(() => {});
+      }
     })();
   }, []);
 
   // Notification listeners
   useEffect(() => {
-    // Notification arrives while app is open
-    notifListener.current = Notifications.addNotificationReceivedListener((notification) => {
+    // Notification arrives while app is in foreground
+    notifListener.current = Notifications.addNotificationReceivedListener(async (notification) => {
       const data = notification.request.content.data as Record<string, any>;
       const signal = parseSignalFromNotification(data);
       if (!signal) return;
@@ -69,22 +74,26 @@ export default function App() {
       addSignal(signal);
 
       if (risk.autoExecute) {
-        if (signal.signalType === 'EOD_EXIT') {
-          api.squareOffAll();
-        } else {
-          setPendingSignal(signal);
-        }
+        const result = await autoExecuteSignal(signal);
+        updateSignal(signal.id, result.orderId
+          ? { status: 'executed', orderId: result.orderId }
+          : { status: 'failed', errorMessage: result.error });
       }
     });
 
-    // User taps notification
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
+    // User taps notification (app was in background)
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(async (response) => {
       const data = response.notification.request.content.data as Record<string, any>;
       const signal = parseSignalFromNotification(data);
-      if (signal) {
-        addSignal(signal);
-        setPendingSignal(signal);
-        // Navigation to Signals tab happens naturally via state
+      if (!signal) return;
+
+      addSignal(signal);
+
+      if (risk.autoExecute) {
+        const result = await autoExecuteSignal(signal);
+        updateSignal(signal.id, result.orderId
+          ? { status: 'executed', orderId: result.orderId }
+          : { status: 'failed', errorMessage: result.error });
       }
     });
 
