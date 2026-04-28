@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { Credentials, RiskSettings } from '../types';
+import { Credentials, RiskSettings, TradeSignal } from '../types';
 
 const KEYS = {
   CREDENTIALS: 'ao_credentials',
@@ -7,6 +7,7 @@ const KEYS = {
   JWT: 'ao_jwt',
   REFRESH: 'ao_refresh',
   PUSH_TOKEN: 'expo_push_token',
+  SIGNALS: 'trade_signals',
 } as const;
 
 export const Storage = {
@@ -60,5 +61,25 @@ export const Storage = {
   async clearAuth(): Promise<void> {
     await SecureStore.deleteItemAsync(KEYS.JWT);
     await SecureStore.deleteItemAsync(KEYS.REFRESH);
+  },
+
+  async saveSignals(signals: TradeSignal[]): Promise<void> {
+    await SecureStore.setItemAsync(KEYS.SIGNALS, JSON.stringify(signals.slice(0, 50)));
+  },
+
+  async loadSignals(): Promise<TradeSignal[]> {
+    const val = await SecureStore.getItemAsync(KEYS.SIGNALS);
+    return val ? (JSON.parse(val) as TradeSignal[]) : [];
+  },
+
+  async appendSignal(signal: TradeSignal): Promise<void> {
+    const existing = await Storage.loadSignals();
+    const deduped = existing.filter((s) => s.id !== signal.id);
+    await Storage.saveSignals([signal, ...deduped]);
+  },
+
+  async patchSignal(id: string, patch: Partial<TradeSignal>): Promise<void> {
+    const signals = await Storage.loadSignals();
+    await Storage.saveSignals(signals.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   },
 };

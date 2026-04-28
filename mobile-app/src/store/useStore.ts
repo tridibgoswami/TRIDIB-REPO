@@ -20,6 +20,7 @@ interface AppState {
 
   // Signals
   signals: TradeSignal[];
+  setSignals: (signals: TradeSignal[]) => void;
   addSignal: (s: TradeSignal) => void;
   updateSignal: (id: string, patch: Partial<TradeSignal>) => void;
   pendingSignal: TradeSignal | null;
@@ -54,6 +55,7 @@ export const useStore = create<AppState>((set) => ({
   setOrders: (orders) => set({ orders }),
 
   signals: [],
+  setSignals: (signals) => set({ signals }),
   addSignal: (s) => set((state) => ({ signals: [s, ...state.signals].slice(0, 50) })),
   updateSignal: (id, patch) =>
     set((state) => ({

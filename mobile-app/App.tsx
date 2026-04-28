@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, Alert } from 'react-native';
+import { Text, View, Alert, AppState, AppStateStatus } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
@@ -38,8 +38,13 @@ export default function App() {
   const notifListener = useRef<Notifications.Subscription>();
   const responseListener = useRef<Notifications.Subscription>();
 
-  const { setLoggedIn, setCredentials, setRisk, setPushToken, addSignal, updateSignal, risk, signals } = useStore();
+  const { setLoggedIn, setCredentials, setRisk, setPushToken, addSignal, updateSignal, setSignals, risk, signals } = useStore();
   const pendingCount = signals.filter((s) => s.status === 'pending').length;
+
+  const loadSignalsFromStorage = async () => {
+    const saved = await Storage.loadSignals();
+    if (saved.length > 0) setSignals(saved);
+  };
 
   // Restore session on launch
   useEffect(() => {
@@ -54,6 +59,9 @@ export default function App() {
         if (result.success) setLoggedIn(true);
       }
 
+      // Load signals saved by background task
+      await loadSignalsFromStorage();
+
       const token = await registerForPushNotifications();
       if (token) {
         setPushToken(token);
@@ -61,6 +69,14 @@ export default function App() {
         Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK).catch(() => {});
       }
     })();
+  }, []);
+
+  // Reload signals from storage when app comes back to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') loadSignalsFromStorage();
+    });
+    return () => sub.remove();
   }, []);
 
   // Notification listeners
@@ -72,12 +88,15 @@ export default function App() {
       if (!signal) return;
 
       addSignal(signal);
+      await Storage.appendSignal(signal);
 
       if (risk.autoExecute) {
         const result = await autoExecuteSignal(signal);
-        updateSignal(signal.id, result.orderId
-          ? { status: 'executed', orderId: result.orderId }
-          : { status: 'failed', errorMessage: result.error });
+        const patch = result.orderId
+          ? { status: 'executed' as const, orderId: result.orderId }
+          : { status: 'failed' as const, errorMessage: result.error };
+        updateSignal(signal.id, patch);
+        await Storage.patchSignal(signal.id, patch);
       }
     });
 
@@ -87,14 +106,8 @@ export default function App() {
       const signal = parseSignalFromNotification(data);
       if (!signal) return;
 
-      addSignal(signal);
-
-      if (risk.autoExecute) {
-        const result = await autoExecuteSignal(signal);
-        updateSignal(signal.id, result.orderId
-          ? { status: 'executed', orderId: result.orderId }
-          : { status: 'failed', errorMessage: result.error });
-      }
+      // Signal may already be in storage (saved by background task); reload to get latest status
+      await loadSignalsFromStorage();
     });
 
     return () => {

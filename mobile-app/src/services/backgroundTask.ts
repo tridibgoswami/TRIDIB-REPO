@@ -53,12 +53,19 @@ TaskManager.defineTask(
     const notifData = notification?.request?.content?.data as Record<string, any> | undefined;
     if (!notifData) return;
 
-    const risk = await Storage.getRisk();
-    if (!risk.autoExecute) return;
-
     const signal = parseSignalFromNotification(notifData);
     if (!signal) return;
 
-    await autoExecuteSignal(signal);
+    // Always persist so signal appears in Signals tab when app opens
+    await Storage.appendSignal(signal);
+
+    const risk = await Storage.getRisk();
+    if (!risk.autoExecute) return;
+
+    const result = await autoExecuteSignal(signal);
+    const patch = result.orderId
+      ? { status: 'executed' as const, orderId: result.orderId }
+      : { status: 'failed' as const, errorMessage: result.error };
+    await Storage.patchSignal(signal.id, patch);
   },
 );

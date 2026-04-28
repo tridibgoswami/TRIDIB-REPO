@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
 import { api } from '../api/angelone';
+import { Storage } from '../services/storage';
 import { TradeSignal } from '../types';
 import { C, fmt } from '../utils/theme';
 
@@ -35,10 +36,14 @@ export default function SignalsScreen() {
       const orderIds = await api.squareOffAll();
       setExecuting(null);
       if (orderIds.length > 0) {
-        updateSignal(signal.id, { status: 'executed', orderId: orderIds.join(',') });
+        const patch = { status: 'executed' as const, orderId: orderIds.join(',') };
+        updateSignal(signal.id, patch);
+        await Storage.patchSignal(signal.id, patch);
         Alert.alert('✅ Squared Off', `${orderIds.length} position(s) closed.`);
       } else {
-        updateSignal(signal.id, { status: 'dismissed', errorMessage: 'No open positions to close' });
+        const patch = { status: 'dismissed' as const, errorMessage: 'No open positions to close' };
+        updateSignal(signal.id, patch);
+        await Storage.patchSignal(signal.id, patch);
         Alert.alert('Nothing to close', 'No open positions found.');
       }
       return;
@@ -65,10 +70,14 @@ export default function SignalsScreen() {
     setExecuting(null);
 
     if (result.orderId) {
-      updateSignal(signal.id, { status: 'executed', orderId: result.orderId });
+      const patch = { status: 'executed' as const, orderId: result.orderId };
+      updateSignal(signal.id, patch);
+      await Storage.patchSignal(signal.id, patch);
       Alert.alert('✅ Order Placed', `Order ID: ${result.orderId}`);
     } else {
-      updateSignal(signal.id, { status: 'failed', errorMessage: result.error });
+      const patch = { status: 'failed' as const, errorMessage: result.error };
+      updateSignal(signal.id, patch);
+      await Storage.patchSignal(signal.id, patch);
       Alert.alert('❌ Order Failed', result.error ?? 'Unknown error');
     }
   };
@@ -132,7 +141,11 @@ export default function SignalsScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={s.dismissBtn}
-              onPress={() => updateSignal(item.id, { status: 'dismissed' })}
+              onPress={async () => {
+                const patch = { status: 'dismissed' as const };
+                updateSignal(item.id, patch);
+                await Storage.patchSignal(item.id, patch);
+              }}
               disabled={!!executing}
             >
               <Text style={s.dismissText}>Dismiss</Text>
