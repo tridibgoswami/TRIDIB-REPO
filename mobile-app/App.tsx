@@ -19,6 +19,15 @@ import { api } from './src/api/angelone';
 import { useStore } from './src/store/useStore';
 import { C } from './src/utils/theme';
 
+// Required: tells Expo how to handle notifications when app is in the foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
 const Tab = createBottomTabNavigator();
 
 const DARK_NAV_THEME = {
