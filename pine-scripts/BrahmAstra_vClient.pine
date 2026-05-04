@@ -1,0 +1,1209 @@
+//@version=5
+// ============================================================
+// BRAHMASTRA — 3m/4m Execution + 15m Trend Filter
+// Features
+// - Original EMA + Dual Supertrend core retained
+// - Optional 15m background trend filter
+// - Optional quality-score filter
+// - Optional breakout confirmation
+// - Optional no-trade zone
+// - Optional early exit checkbox
+// - Real target exits (from candle +1 only)
+// - Backtest summary + last-day trade log
+// - BUY/SELL signals confirmed only on candle close
+// - Signal labels / trade log / dashboard update only on candle close
+// - TARGET hit remains immediate (intrabar)
+// - TRAILING STOP: ratcheting breakeven stop (intrabar trigger)
+// - SIGNAL_PRICE plot: use {{plot("SIGNAL_PRICE")}} in alert messages
+// ============================================================
+
+indicator("BrahmAstra_vClient", shorttitle="BrahmAstra_vClient", overlay=true, max_labels_count=500)
+
+// ─────────────────────────────────────────────
+// CHART MODE / GENERAL
+// ─────────────────────────────────────────────
+chart_mode_input = "Auto Detect"
+
+ticker_up = str.upper(syminfo.ticker)
+full_desc = str.upper(syminfo.description)
+
+auto_is_ce  = str.endswith(ticker_up, "CE") or str.endswith(ticker_up, "CALL") or str.contains(ticker_up, "CE.") or str.contains(ticker_up, "CALL.") or str.contains(full_desc, "CALL")
+auto_is_pe  = str.endswith(ticker_up, "PE") or str.endswith(ticker_up, "PUT")  or str.contains(ticker_up, "PE.") or str.contains(ticker_up, "PUT.")  or str.contains(full_desc, "PUT")
+auto_mode   = auto_is_ce ? "CE Option (Call)" : auto_is_pe ? "PE Option (Put)" : "Index / Stock"
+
+resolved_mode = chart_mode_input == "Auto Detect" ? auto_mode : chart_mode_input
+is_index = resolved_mode == "Index / Stock"
+
+// ─────────────────────────────────────────────
+// INPUTS (ONLY USER-VISIBLE OPTIONS)
+// ─────────────────────────────────────────────
+show_signals       = input.bool(true,  "Show BUY/SELL Labels", group="Inputs", display=display.none)
+show_exits         = input.bool(true,  "Show EXIT/TARGET Labels", group="Inputs", display=display.none)
+show_bt_dashboard  = input.bool(false, "Show Summary Dashboard", group="Inputs", display=display.none)
+show_bt_trade_log  = input.bool(true,  "Show Current/Last-Day Trade Log", group="Inputs", display=display.none)
+use_chop_filter_manual     = input.bool(true,  "Enable Choppy Market Filter", group="Inputs", display=display.none)
+use_15m_filter_manual      = input.bool(false, "Use 15m Background Trend Filter", group="Inputs", display=display.none)
+use_breakout_filter_manual = input.bool(true,  "Require Structure Breakout", group="Inputs", display=display.none)
+use_quality_filter_manual  = input.bool(true,  "Use Quality Score Filter", group="Inputs", display=display.none)
+use_no_trade_zone_manual   = input.bool(true,  "Use No Trade Zone", group="Inputs", display=display.none)
+use_early_exit_manual      = input.bool(true,  "Enable Early Exit (2 Candle Validation)", group="Inputs", display=display.none)
+use_trail_stop_manual      = input.bool(true,  "Enable Trailing Stop", group="Inputs", display=display.none)
+use_discount_entry         = input.bool(true,  "Use Discount Entry Price", group="Inputs", display=display.none)
+bt_wide_entry_fraction_manual = input.float(0.15, "Discount Entry Fraction", group="Inputs", minval=0.0, maxval=1.0, step=0.01, display=display.none,
+     tooltip="Used only when 'Use Discount Entry Price' is enabled. Example: 0.10 = 10%, 0.20 = 20%, 0.30 = 30% of candle range from low.")
+bt_target_pct_manual       = input.float(0.45, "Target % per Trade", group="Inputs", minval=0.1, maxval=100.0, step=0.1, display=display.none)
+
+// Hidden / fixed controls
+use_auto_preset   = true
+show_preset_label = false
+show_ema          = false
+show_st1          = false
+show_st2          = false
+signal_offset     = 5
+force_exit_h      = 15
+force_exit_m      = 15
+sig_start_candle  = 1
+avoid_midday      = false
+
+// Hidden manual fallback defaults
+ema_fast_len_manual = 4
+ema_mid_len_manual  = 22
+ema_slow_len_manual = 29
+st1_atr_manual      = 8
+st1_mult_manual     = 4.0
+st2_atr_manual      = 10
+st2_mult_manual     = 1.6
+adx_len_filter_manual       = 12
+adx_min_filter_manual       = 16.0
+atr_len_filter_manual       = 14
+ema_spread_atr_min_manual   = 0.12
+range_lookback_manual       = 8
+range_atr_max_manual        = 4.0
+chop_recent_bars_manual     = 4
+htf_tf_manual               = "15"
+htf_fast_len_manual         = 13
+htf_mid_len_manual          = 34
+htf_slow_len_manual         = 40
+breakout_lookback_manual    = 3
+min_quality_score_manual    = 6
+max_ema_crosses_10_manual   = 6
+max_st2_flips_10_manual     = 4
+min_slow_slope_atr_manual   = 0.08
+min_body_pct_manual         = 0.35
+buy_close_pos_min_manual    = 0.55
+sell_close_pos_max_manual   = 0.45
+trail_trigger_pct_manual    = 0.60
+trail_atr_mult_manual       = 0.40
+bt_from                     = timestamp("01 Apr 2026 09:15 +0530")
+bt_to                       = timestamp("31 Dec 2026 15:30 +0530")
+bt_wide_candle_pct_manual   = 0.12
+
+chart_tf_sec = timeframe.in_seconds()
+if chart_tf_sec > 30 * 60
+    runtime.error("For best results use lower timeframe of 15 mins or less.")
+
+// ─────────────────────────────────────────────
+// AUTO PRESET RESOLVER
+// ─────────────────────────────────────────────
+ticker_id_up = str.upper(syminfo.tickerid)
+is_banknifty = str.contains(ticker_id_up, "BANKNIFTY") or str.contains(ticker_up, "BANKNIFTY")
+is_nifty_raw = str.contains(ticker_id_up, "NIFTY") or str.contains(ticker_up, "NIFTY")
+is_nifty = is_nifty_raw and not is_banknifty
+
+tf_str = timeframe.period
+resolved_symbol = is_banknifty ? "BANKNIFTY" : is_nifty ? "NIFTY" : "DEFAULT"
+resolved_tf = tf_str == "2" ? "2" : tf_str == "3" ? "3" : tf_str == "4" ? "4" : tf_str == "5" ? "5" : tf_str == "15" ? "15" : "5"
+
+preset_key =
+     resolved_symbol == "BANKNIFTY" and resolved_tf == "2"  ? "BANKNIFTY_3"  :
+     resolved_symbol == "BANKNIFTY" and resolved_tf == "3"  ? "BANKNIFTY_3"  :
+     resolved_symbol == "BANKNIFTY" and resolved_tf == "4"  ? "BANKNIFTY_4"  :
+     resolved_symbol == "BANKNIFTY" and resolved_tf == "5"  ? "BANKNIFTY_5"  :
+     resolved_symbol == "BANKNIFTY" and resolved_tf == "15" ? "BANKNIFTY_15" :
+     resolved_symbol == "NIFTY" and resolved_tf == "2"      ? "NIFTY_5"      :
+     resolved_symbol == "NIFTY" and resolved_tf == "3"      ? "NIFTY_5"      :
+     resolved_symbol == "NIFTY" and resolved_tf == "4"      ? "NIFTY_5"      :
+     resolved_symbol == "NIFTY" and resolved_tf == "5"      ? "NIFTY_5"      :
+     resolved_symbol == "NIFTY" and resolved_tf == "15"     ? "NIFTY_15"     :
+     "MANUAL"
+
+int ema_fast_len = ema_fast_len_manual
+int ema_mid_len = ema_mid_len_manual
+int ema_slow_len = ema_slow_len_manual
+int st1_atr = st1_atr_manual
+float st1_mult = st1_mult_manual
+int st2_atr = st2_atr_manual
+float st2_mult = st2_mult_manual
+
+bool use_chop_filter = use_chop_filter_manual
+int adx_len_filter = adx_len_filter_manual
+float adx_min_filter = adx_min_filter_manual
+int atr_len_filter = atr_len_filter_manual
+float ema_spread_atr_min = ema_spread_atr_min_manual
+int range_lookback = range_lookback_manual
+float range_atr_max = range_atr_max_manual
+int chop_recent_bars = chop_recent_bars_manual
+
+bool use_15m_filter = use_15m_filter_manual
+string htf_tf = htf_tf_manual
+int htf_fast_len = htf_fast_len_manual
+int htf_mid_len = htf_mid_len_manual
+int htf_slow_len = htf_slow_len_manual
+
+bool use_breakout_filter = use_breakout_filter_manual
+int breakout_lookback = breakout_lookback_manual
+bool use_quality_filter = use_quality_filter_manual
+int min_quality_score = min_quality_score_manual
+bool use_no_trade_zone = use_no_trade_zone_manual
+int max_ema_crosses_10 = max_ema_crosses_10_manual
+int max_st2_flips_10 = max_st2_flips_10_manual
+float min_slow_slope_atr = min_slow_slope_atr_manual
+float min_body_pct = min_body_pct_manual
+float buy_close_pos_min = buy_close_pos_min_manual
+float sell_close_pos_max = sell_close_pos_max_manual
+bool use_early_exit = use_early_exit_manual
+
+bool use_trail_stop = use_trail_stop_manual
+float trail_trigger_pct = trail_trigger_pct_manual
+float trail_atr_mult = trail_atr_mult_manual
+
+float bt_target_pct = bt_target_pct_manual
+float bt_wide_candle_pct = bt_wide_candle_pct_manual
+float bt_wide_entry_fraction = bt_wide_entry_fraction_manual
+
+if use_auto_preset and preset_key != "MANUAL"
+    if preset_key == "BANKNIFTY_3"
+        ema_fast_len := 5
+        ema_mid_len := 9
+        ema_slow_len := 20
+        st1_atr := 10
+        st1_mult := 3.7
+        st2_atr := 8
+        st2_mult := 1.4
+        use_chop_filter := true
+        adx_len_filter := 12
+        adx_min_filter := 16
+        atr_len_filter := 14
+        ema_spread_atr_min := 0.12
+        range_lookback := 10
+        range_atr_max := 3
+        chop_recent_bars := 4
+        use_15m_filter := false
+        htf_tf := "15"
+        htf_fast_len := 13
+        htf_mid_len := 34
+        htf_slow_len := 40
+        use_breakout_filter := true
+        breakout_lookback := 3
+        use_quality_filter := true
+        min_quality_score := 6
+        use_no_trade_zone := false
+        max_ema_crosses_10 := 6
+        max_st2_flips_10 := 4
+        min_slow_slope_atr := 0.08
+        min_body_pct := 0.4
+        buy_close_pos_min := 0.6
+        sell_close_pos_max := 0.4
+        use_early_exit := false
+        use_trail_stop := true
+        trail_trigger_pct := 0.6
+        trail_atr_mult := 0.1
+        bt_target_pct := 0.45
+        bt_wide_candle_pct := 0.1
+        bt_wide_entry_fraction := 0.15
+    else if preset_key == "BANKNIFTY_4"
+        ema_fast_len := 5
+        ema_mid_len := 20
+        ema_slow_len := 28
+        st1_atr := 14
+        st1_mult := 3.7
+        st2_atr := 7
+        st2_mult := 1.3
+        use_chop_filter := true
+        adx_len_filter := 12
+        adx_min_filter := 16
+        atr_len_filter := 14
+        ema_spread_atr_min := 0.12
+        range_lookback := 8
+        range_atr_max := 3
+        chop_recent_bars := 4
+        use_15m_filter := false
+        htf_tf := "15"
+        htf_fast_len := 13
+        htf_mid_len := 34
+        htf_slow_len := 40
+        use_breakout_filter := true
+        breakout_lookback := 3
+        use_quality_filter := true
+        min_quality_score := 6
+        use_no_trade_zone := false
+        max_ema_crosses_10 := 6
+        max_st2_flips_10 := 4
+        min_slow_slope_atr := 0.08
+        min_body_pct := 0.4
+        buy_close_pos_min := 0.6
+        sell_close_pos_max := 0.4
+        use_early_exit := false
+        use_trail_stop := true
+        trail_trigger_pct := 0.55
+        trail_atr_mult := 0.1
+        bt_target_pct := 0.45
+        bt_wide_candle_pct := 0.12
+        bt_wide_entry_fraction := 0.15
+    else if preset_key == "BANKNIFTY_5"
+        ema_fast_len := 7
+        ema_mid_len := 24
+        ema_slow_len := 34
+        st1_atr := 14
+        st1_mult := 3.9
+        st2_atr := 14
+        st2_mult := 1.9
+        use_chop_filter := true
+        adx_len_filter := 12
+        adx_min_filter := 16
+        atr_len_filter := 14
+        ema_spread_atr_min := 0.12
+        range_lookback := 8
+        range_atr_max := 3
+        chop_recent_bars := 4
+        use_15m_filter := false
+        htf_tf := "15"
+        htf_fast_len := 13
+        htf_mid_len := 34
+        htf_slow_len := 40
+        use_breakout_filter := true
+        breakout_lookback := 3
+        use_quality_filter := true
+        min_quality_score := 6
+        use_no_trade_zone := false
+        max_ema_crosses_10 := 6
+        max_st2_flips_10 := 4
+        min_slow_slope_atr := 0.08
+        min_body_pct := 0.4
+        buy_close_pos_min := 0.6
+        sell_close_pos_max := 0.4
+        use_early_exit := false
+        use_trail_stop := true
+        trail_trigger_pct := 0.6
+        trail_atr_mult := 0.1
+        bt_target_pct := 0.45
+        bt_wide_candle_pct := 0.12
+        bt_wide_entry_fraction := 0.2
+    else if preset_key == "BANKNIFTY_15"
+        ema_fast_len := 5
+        ema_mid_len := 14
+        ema_slow_len := 24
+        st1_atr := 10
+        st1_mult := 3.0
+        st2_atr := 7
+        st2_mult := 1.8
+        use_chop_filter := true
+        adx_len_filter := 12
+        adx_min_filter := 16
+        atr_len_filter := 14
+        ema_spread_atr_min := 0.12
+        range_lookback := 8
+        range_atr_max := 3
+        chop_recent_bars := 4
+        use_15m_filter := false
+        htf_tf := "15"
+        htf_fast_len := 13
+        htf_mid_len := 34
+        htf_slow_len := 40
+        use_breakout_filter := true
+        breakout_lookback := 3
+        use_quality_filter := true
+        min_quality_score := 6
+        use_no_trade_zone := false
+        max_ema_crosses_10 := 6
+        max_st2_flips_10 := 4
+        min_slow_slope_atr := 0.08
+        min_body_pct := 0.4
+        buy_close_pos_min := 0.6
+        sell_close_pos_max := 0.4
+        use_early_exit := false
+        use_trail_stop := true
+        trail_trigger_pct := 0.60
+        trail_atr_mult := 0.1
+        bt_target_pct := 0.5
+        bt_wide_candle_pct := 0.12
+        bt_wide_entry_fraction := 0.2
+    else if preset_key == "NIFTY_5"
+        ema_fast_len := 5
+        ema_mid_len := 18
+        ema_slow_len := 24
+        st1_atr := 8
+        st1_mult := 3.3
+        st2_atr := 8
+        st2_mult := 1.5
+        use_chop_filter := true
+        adx_len_filter := 12
+        adx_min_filter := 16
+        atr_len_filter := 14
+        ema_spread_atr_min := 0.12
+        range_lookback := 8
+        range_atr_max := 3
+        chop_recent_bars := 4
+        use_15m_filter := false
+        htf_tf := "15"
+        htf_fast_len := 13
+        htf_mid_len := 34
+        htf_slow_len := 40
+        use_breakout_filter := true
+        breakout_lookback := 3
+        use_quality_filter := true
+        min_quality_score := 6
+        use_no_trade_zone := false
+        max_ema_crosses_10 := 6
+        max_st2_flips_10 := 4
+        min_slow_slope_atr := 0.08
+        min_body_pct := 0.4
+        buy_close_pos_min := 0.6
+        sell_close_pos_max := 0.4
+        use_early_exit := false
+        use_trail_stop := true
+        trail_trigger_pct := 0.6
+        trail_atr_mult := 0.1
+        bt_target_pct := 0.45
+        bt_wide_candle_pct := 0.12
+        bt_wide_entry_fraction := 0.15
+    else if preset_key == "NIFTY_15"
+        ema_fast_len := 4
+        ema_mid_len := 18
+        ema_slow_len := 24
+        st1_atr := 9
+        st1_mult := 3.8
+        st2_atr := 8
+        st2_mult := 1.0
+        use_chop_filter := true
+        adx_len_filter := 12
+        adx_min_filter := 16
+        atr_len_filter := 14
+        ema_spread_atr_min := 0.12
+        range_lookback := 8
+        range_atr_max := 3
+        chop_recent_bars := 4
+        use_15m_filter := false
+        htf_tf := "15"
+        htf_fast_len := 13
+        htf_mid_len := 34
+        htf_slow_len := 40
+        use_breakout_filter := true
+        breakout_lookback := 3
+        use_quality_filter := true
+        min_quality_score := 6
+        use_no_trade_zone := false
+        max_ema_crosses_10 := 6
+        max_st2_flips_10 := 4
+        min_slow_slope_atr := 0.08
+        min_body_pct := 0.4
+        buy_close_pos_min := 0.6
+        sell_close_pos_max := 0.4
+        use_early_exit := false
+        use_trail_stop := true
+        trail_trigger_pct := 0.60
+        trail_atr_mult := 0.1
+        bt_target_pct := 0.5
+        bt_wide_candle_pct := 0.12
+        bt_wide_entry_fraction := 0.2
+
+// ─────────────────────────────────────────────
+// TIME UTILITIES
+// ─────────────────────────────────────────────
+ist_hour   = hour(time,   "Asia/Kolkata")
+ist_minute = minute(time, "Asia/Kolkata")
+is_new_day = ta.change(dayofweek(time, "Asia/Kolkata")) != 0 or (ist_hour == 9 and ist_minute == 15)
+bar_closed = barstate.isconfirmed
+
+var int candles_today = 0
+if is_new_day
+    candles_today := 0
+else if (ist_hour > 9 or (ist_hour == 9 and ist_minute >= 15)) and ist_hour < 16
+    candles_today += 1
+
+is_entry_window      = (ist_hour > 9 or (ist_hour == 9 and ist_minute >= 15)) and ist_hour < 15 and candles_today >= sig_start_candle
+is_force_exit_candle = ist_hour == force_exit_h and ist_minute == force_exit_m
+is_midday_chop       = (ist_hour == 11 and ist_minute >= 15) or (ist_hour == 12)
+
+// ─────────────────────────────────────────────
+// CALCULATIONS
+// ─────────────────────────────────────────────
+ema_fast = ta.ema(close, ema_fast_len)
+ema_mid  = ta.ema(close, ema_mid_len)
+ema_slow = ta.ema(close, ema_slow_len)
+
+[st1_line, st1_dir] = ta.supertrend(st1_mult, st1_atr)
+[st2_line, st2_dir] = ta.supertrend(st2_mult, st2_atr)
+
+st1_bull = st1_dir < 0
+st1_bear = st1_dir > 0
+st2_bull = st2_dir < 0
+st2_bear = st2_dir > 0
+
+st2_flipped_bull = st2_bull and not st2_bull[1]
+st2_flipped_bear = st2_bear and not st2_bear[1]
+
+atr_filter = ta.atr(atr_len_filter)
+up_move_filter   = high - high[1]
+down_move_filter = low[1] - low
+plus_dm_filter  = (up_move_filter > down_move_filter and up_move_filter > 0) ? up_move_filter : 0.0
+minus_dm_filter = (down_move_filter > up_move_filter and down_move_filter > 0) ? down_move_filter : 0.0
+trur_filter = ta.rma(ta.tr, adx_len_filter)
+plus_di_filter  = trur_filter == 0.0 ? 0.0 : 100.0 * ta.rma(plus_dm_filter, adx_len_filter) / trur_filter
+minus_di_filter = trur_filter == 0.0 ? 0.0 : 100.0 * ta.rma(minus_dm_filter, adx_len_filter) / trur_filter
+dx_filter = (plus_di_filter + minus_di_filter == 0.0) ? 0.0 : 100.0 * math.abs(plus_di_filter - minus_di_filter) / (plus_di_filter + minus_di_filter)
+adx_filter = ta.rma(dx_filter, adx_len_filter)
+
+ema_spread_atr = atr_filter == 0.0 ? 0.0 : math.abs(ema_fast - ema_mid) / atr_filter
+recent_range = ta.highest(high, range_lookback) - ta.lowest(low, range_lookback)
+range_atr = atr_filter == 0.0 ? 9999.0 : recent_range / atr_filter
+
+chop_score = 0
+chop_score += adx_filter < adx_min_filter ? 1 : 0
+chop_score += ema_spread_atr < ema_spread_atr_min ? 1 : 0
+chop_score += range_atr < range_atr_max ? 1 : 0
+is_choppy_market = chop_score >= 2
+
+var int bars_since_choppy = 1000000
+bars_since_choppy := is_choppy_market ? 0 : math.min(bars_since_choppy[1] + 1, 1000000)
+was_choppy_recently = bars_since_choppy <= chop_recent_bars
+
+buy_breakout_ok  = close > ta.highest(high, breakout_lookback)[1]
+sell_breakout_ok = close < ta.lowest(low, breakout_lookback)[1]
+
+ema_slow_slope_atr = atr_filter == 0.0 ? 0.0 : math.abs(ema_slow - ema_slow[5]) / atr_filter
+
+close_above_mid = close > ema_mid
+ema_cross_event = close_above_mid != close_above_mid[1]
+ema_mid_crosses_10 = math.sum(ema_cross_event ? 1.0 : 0.0, 10)
+
+st2_flip_event = st2_flipped_bull or st2_flipped_bear
+st2_flips_10 = math.sum(st2_flip_event ? 1.0 : 0.0, 10)
+
+candle_range = math.max(high - low, syminfo.mintick)
+body_pct = math.abs(close - open) / candle_range
+close_pos = (close - low) / candle_range
+buy_candle_ok = close > open and body_pct >= min_body_pct and close_pos >= buy_close_pos_min
+sell_candle_ok = close < open and close_pos <= sell_close_pos_max and body_pct >= min_body_pct
+
+// 15m background filter
+htf_close    = request.security(syminfo.tickerid, htf_tf, close)
+htf_ema_fast = request.security(syminfo.tickerid, htf_tf, ta.ema(close, htf_fast_len))
+htf_ema_mid  = request.security(syminfo.tickerid, htf_tf, ta.ema(close, htf_mid_len))
+htf_ema_slow = request.security(syminfo.tickerid, htf_tf, ta.ema(close, htf_slow_len))
+htf_buy_ok  = htf_close > htf_ema_slow and htf_ema_fast > htf_ema_mid
+htf_sell_ok = htf_close < htf_ema_slow and htf_ema_fast < htf_ema_mid
+
+no_trade_zone = use_no_trade_zone and (ema_mid_crosses_10 >= max_ema_crosses_10 or st2_flips_10 >= max_st2_flips_10 or ema_slow_slope_atr < min_slow_slope_atr or (avoid_midday and is_midday_chop))
+
+// ─────────────────────────────────────────────
+// TRADE STATE
+// ─────────────────────────────────────────────
+var bool in_buy        = false
+var bool in_sell       = false
+var bool allow_reentry = false
+
+var int   entry_bar_index     = na
+var float signal_candle_high  = na
+var float signal_candle_low   = na
+var float signal_candle_close = na
+var bool  early_exit_watch_on = false
+
+var float live_entry_price  = na
+var float live_target_price = na
+var bool  live_trade_open   = false
+var bool  live_trade_is_buy = false
+
+// ── Trailing stop live-signal state ───────────────────────────────────────────
+var float trail_stop_level  = na
+var bool  trail_active      = false
+var float trail_peak_price  = na
+
+// ── Label display caches (preserve prices before trade state reset) ───────────
+var float display_target_price = na
+var float display_trail_price  = na
+
+if is_new_day
+    in_buy              := false
+    in_sell             := false
+    allow_reentry       := true
+    entry_bar_index     := na
+    signal_candle_high  := na
+    signal_candle_low   := na
+    signal_candle_close := na
+    early_exit_watch_on := false
+    live_entry_price    := na
+    live_target_price   := na
+    live_trade_open     := false
+    live_trade_is_buy   := false
+    trail_stop_level    := na
+    trail_active        := false
+    trail_peak_price    := na
+    display_target_price := na
+    display_trail_price  := na
+
+st2_trigger_bull = allow_reentry ? st2_bull : st2_flipped_bull
+st2_trigger_bear = allow_reentry ? st2_bear : st2_flipped_bear
+
+buy_quality_score = 0
+buy_quality_score += close > ema_slow ? 1 : 0
+buy_quality_score += ema_fast > ema_mid ? 1 : 0
+buy_quality_score += st1_bull ? 1 : 0
+buy_quality_score += st2_trigger_bull ? 1 : 0
+buy_quality_score += adx_filter >= adx_min_filter ? 1 : 0
+buy_quality_score += ema_spread_atr >= ema_spread_atr_min ? 1 : 0
+buy_quality_score += buy_breakout_ok ? 1 : 0
+buy_quality_score += buy_candle_ok ? 1 : 0
+buy_quality_score += htf_buy_ok ? 1 : 0
+buy_quality_score += not no_trade_zone ? 1 : 0
+
+sell_quality_score = 0
+sell_quality_score += close < ema_slow ? 1 : 0
+sell_quality_score += ema_fast < ema_mid ? 1 : 0
+sell_quality_score += st1_bear ? 1 : 0
+sell_quality_score += st2_trigger_bear ? 1 : 0
+sell_quality_score += adx_filter >= adx_min_filter ? 1 : 0
+sell_quality_score += ema_spread_atr >= ema_spread_atr_min ? 1 : 0
+sell_quality_score += sell_breakout_ok ? 1 : 0
+sell_quality_score += sell_candle_ok ? 1 : 0
+sell_quality_score += htf_sell_ok ? 1 : 0
+sell_quality_score += not no_trade_zone ? 1 : 0
+
+base_buy_signal = is_entry_window and not in_buy and not in_sell and
+                  close > ema_slow and ema_fast > ema_mid and st1_bull and st2_trigger_bull
+
+base_sell_signal = is_entry_window and not in_buy and not in_sell and
+                   close < ema_slow and ema_fast < ema_mid and st1_bear and st2_trigger_bear
+
+buy_filter_ok = true
+sell_filter_ok = true
+
+if use_chop_filter
+    buy_filter_ok := not is_choppy_market and (not was_choppy_recently or buy_breakout_ok)
+    sell_filter_ok := not is_choppy_market and (not was_choppy_recently or sell_breakout_ok)
+
+if use_breakout_filter
+    buy_filter_ok := buy_filter_ok and buy_breakout_ok
+    sell_filter_ok := sell_filter_ok and sell_breakout_ok
+
+if use_15m_filter
+    buy_filter_ok := buy_filter_ok and htf_buy_ok
+    sell_filter_ok := sell_filter_ok and htf_sell_ok
+
+if use_quality_filter
+    buy_filter_ok := buy_filter_ok and buy_quality_score >= min_quality_score
+    sell_filter_ok := sell_filter_ok and sell_quality_score >= min_quality_score
+
+if use_no_trade_zone
+    buy_filter_ok := buy_filter_ok and not no_trade_zone
+    sell_filter_ok := sell_filter_ok and not no_trade_zone
+
+buy_signal_raw  = base_buy_signal and buy_filter_ok
+sell_signal_raw = base_sell_signal and sell_filter_ok
+
+// CONFIRMED ONLY ON BAR CLOSE
+buy_signal  = buy_signal_raw and bar_closed
+sell_signal = sell_signal_raw and bar_closed
+
+range_now = high - low
+wide_threshold_now = close * (bt_wide_candle_pct / 100.0)
+is_wide_now = range_now > wide_threshold_now
+entry_price_now =
+     use_discount_entry and is_wide_now ?
+         (buy_signal ? (high - range_now * bt_wide_entry_fraction)
+                     : (low + range_now * bt_wide_entry_fraction))
+     : close
+buy_target_now  = entry_price_now * (1.0 + bt_target_pct / 100.0)
+sell_target_now = entry_price_now * (1.0 - bt_target_pct / 100.0)
+
+if buy_signal
+    in_buy              := true
+    in_sell             := false
+    allow_reentry       := false
+    entry_bar_index     := bar_index
+    signal_candle_high  := high
+    signal_candle_low   := low
+    signal_candle_close := close
+    early_exit_watch_on := use_early_exit
+    live_trade_open     := true
+    live_trade_is_buy   := true
+    live_entry_price    := entry_price_now
+    live_target_price   := buy_target_now
+    trail_stop_level    := na
+    trail_active        := false
+    trail_peak_price    := na
+
+if sell_signal
+    in_sell             := true
+    in_buy              := false
+    allow_reentry       := false
+    entry_bar_index     := bar_index
+    signal_candle_high  := high
+    signal_candle_low   := low
+    signal_candle_close := close
+    early_exit_watch_on := use_early_exit
+    live_trade_open     := true
+    live_trade_is_buy   := false
+    live_entry_price    := entry_price_now
+    live_target_price   := sell_target_now
+    trail_stop_level    := na
+    trail_active        := false
+    trail_peak_price    := na
+
+// ─────────────────────────────────────────────
+// EXITS
+// ─────────────────────────────────────────────
+bars_after_entry = na(entry_bar_index) ? na : (bar_index - entry_bar_index)
+
+// RAW NON-TARGET EXIT CONDITIONS
+buy_early_fail_raw  = use_early_exit and in_buy and early_exit_watch_on and not na(bars_after_entry) and (bars_after_entry == 1 or bars_after_entry == 2) and low < signal_candle_low and close < signal_candle_close
+sell_early_fail_raw = use_early_exit and in_sell and early_exit_watch_on and not na(bars_after_entry) and (bars_after_entry == 1 or bars_after_entry == 2) and high > signal_candle_high and close > signal_candle_close
+
+// CONFIRMED NON-TARGET EXITS ONLY ON BAR CLOSE
+exit_buy_early  = buy_early_fail_raw and bar_closed
+exit_sell_early = sell_early_fail_raw and bar_closed
+
+if use_early_exit and early_exit_watch_on and not na(bars_after_entry) and bars_after_entry >= 2 and not exit_buy_early and not exit_sell_early and bar_closed
+    early_exit_watch_on := false
+
+// ─────────────────────────────────────────────
+// TRAILING STOP — UPDATE & EXIT (live signals)
+// ─────────────────────────────────────────────
+if use_trail_stop and (in_buy or in_sell) and live_trade_open and not na(bars_after_entry) and bars_after_entry >= 1 and not na(live_target_price) and not na(live_entry_price)
+    _trail_trigger_dist = math.abs(live_target_price - live_entry_price) * trail_trigger_pct
+    if in_buy
+        _new_peak = na(trail_peak_price) ? high[1] : math.max(trail_peak_price, high[1])
+        trail_peak_price := _new_peak
+        if (_new_peak - live_entry_price) >= _trail_trigger_dist
+            trail_active := true
+        if trail_active
+            _candidate = math.max(live_entry_price, _new_peak - trail_atr_mult * atr_filter)
+            trail_stop_level := na(trail_stop_level) ? _candidate : math.max(trail_stop_level, _candidate)
+    if in_sell
+        _new_peak = na(trail_peak_price) ? low[1] : math.min(trail_peak_price, low[1])
+        trail_peak_price := _new_peak
+        if (live_entry_price - _new_peak) >= _trail_trigger_dist
+            trail_active := true
+        if trail_active
+            _candidate = math.min(live_entry_price, _new_peak + trail_atr_mult * atr_filter)
+            trail_stop_level := na(trail_stop_level) ? _candidate : math.min(trail_stop_level, _candidate)
+
+// TRAIL STOP EXIT — INTRABAR
+exit_buy_target  = in_buy and live_trade_open and live_trade_is_buy and not na(live_target_price) and not na(bars_after_entry) and bars_after_entry >= 1 and high >= live_target_price
+exit_sell_target = in_sell and live_trade_open and not live_trade_is_buy and not na(live_target_price) and not na(bars_after_entry) and bars_after_entry >= 1 and low <= live_target_price
+
+exit_buy_trail  = use_trail_stop and in_buy  and trail_active and not na(trail_stop_level) and not na(bars_after_entry) and bars_after_entry >= 1 and low  <= trail_stop_level and not exit_buy_target
+exit_sell_trail = use_trail_stop and in_sell and trail_active and not na(trail_stop_level) and not na(bars_after_entry) and bars_after_entry >= 1 and high >= trail_stop_level and not exit_sell_target
+
+// NON-TARGET EXITS ONLY ON BAR CLOSE
+exit_buy_normal  = in_buy[1]  and close < ema_mid and not exit_buy_target  and not exit_buy_trail  and bar_closed
+exit_sell_normal = in_sell[1] and close > ema_mid and not exit_sell_target and not exit_sell_trail and bar_closed
+exit_buy_forced  = in_buy[1]  and is_force_exit_candle and not exit_buy_target  and not exit_buy_trail  and bar_closed
+exit_sell_forced = in_sell[1] and is_force_exit_candle and not exit_sell_target and not exit_sell_trail and bar_closed
+
+exit_buy  = exit_buy_target  or exit_buy_trail  or exit_buy_early  or exit_buy_normal  or exit_buy_forced
+exit_sell = exit_sell_target or exit_sell_trail or exit_sell_early or exit_sell_normal or exit_sell_forced
+
+if exit_buy_target or exit_sell_target
+    display_target_price := live_target_price
+
+if exit_buy_trail or exit_sell_trail
+    display_trail_price := trail_stop_level
+
+if exit_buy
+    if not exit_buy_target
+        display_target_price := na
+    if not exit_buy_trail
+        display_trail_price := na
+    in_buy              := false
+    allow_reentry       := true
+    entry_bar_index     := na
+    signal_candle_high  := na
+    signal_candle_low   := na
+    signal_candle_close := na
+    early_exit_watch_on := false
+    live_entry_price    := na
+    live_target_price   := na
+    live_trade_open     := false
+    live_trade_is_buy   := false
+    trail_stop_level    := na
+    trail_active        := false
+    trail_peak_price    := na
+
+if exit_sell
+    if not exit_sell_target
+        display_target_price := na
+    if not exit_sell_trail
+        display_trail_price := na
+    in_sell             := false
+    allow_reentry       := true
+    entry_bar_index     := na
+    signal_candle_high  := na
+    signal_candle_low   := na
+    signal_candle_close := na
+    early_exit_watch_on := false
+    live_entry_price    := na
+    live_target_price   := na
+    live_trade_open     := false
+    live_trade_is_buy   := false
+    trail_stop_level    := na
+    trail_active        := false
+    trail_peak_price    := na
+
+// ─────────────────────────────────────────────
+// SIGNAL PRICE — addressable via {{plot("SIGNAL_PRICE")}} in alerts
+// ─────────────────────────────────────────────
+// Captures the correct price for each signal type:
+//   BUY / SELL          → indicator's calculated entry price (live_entry_price)
+//   BUY_TARGET / SELL_TARGET → target level that was hit
+//   TRAIL_STOP_BUY / TRAIL_STOP_SELL → ratcheting stop level that was hit
+//   All other exits     → bar close price
+var float signal_price = na
+signal_price :=
+    buy_signal or sell_signal                                                                                       ? live_entry_price :
+    exit_buy_target or exit_sell_target                                                                             ? display_target_price :
+    exit_buy_trail or exit_sell_trail                                                                               ? display_trail_price :
+    exit_buy_early or exit_sell_early or exit_buy_normal or exit_sell_normal or exit_buy_forced or exit_sell_forced ? close :
+    na
+
+plot(signal_price, title="SIGNAL_PRICE", display=display.data_window)
+
+// ─────────────────────────────────────────────
+// LABELS ONLY (core plots intentionally hidden to keep Style tab minimal)
+// ─────────────────────────────────────────────
+
+if show_signals and buy_signal
+    label.new(bar_index, low - signal_offset, "BUY @" + str.tostring(live_entry_price, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.lime,0), textcolor=color.black, style=label.style_label_up, size=size.normal)
+
+if show_signals and sell_signal and is_index
+    label.new(bar_index, high + signal_offset, "SELL @" + str.tostring(live_entry_price, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.red,0), textcolor=color.white, style=label.style_label_down, size=size.normal)
+
+if show_exits and exit_buy_target
+    label.new(bar_index, high + signal_offset, "BUY Target @" + str.tostring(display_target_price, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.green,0), textcolor=color.white, style=label.style_label_down, size=size.normal)
+
+if show_exits and exit_sell_target and is_index
+    label.new(bar_index, low - signal_offset, "SELL Target @" + str.tostring(display_target_price, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.green,0), textcolor=color.white, style=label.style_label_up, size=size.normal)
+
+if show_exits and exit_buy_trail
+    label.new(bar_index, high + signal_offset, "Trail Stop BUY @" + str.tostring(display_trail_price, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.orange,0), textcolor=color.black, style=label.style_label_down, size=size.normal)
+
+if show_exits and exit_sell_trail and is_index
+    label.new(bar_index, low - signal_offset, "Trail Stop SELL @" + str.tostring(display_trail_price, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.orange,0), textcolor=color.black, style=label.style_label_up, size=size.normal)
+
+if show_exits and exit_buy_early
+    label.new(bar_index, high + signal_offset, "Trail Stop BUY @" + str.tostring(close, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.yellow,0), textcolor=color.black, style=label.style_label_down, size=size.normal)
+
+if show_exits and exit_sell_early and is_index
+    label.new(bar_index, low - signal_offset, "Trail Stop SELL @" + str.tostring(close, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.yellow,0), textcolor=color.black, style=label.style_label_up, size=size.normal)
+
+if show_exits and exit_buy_normal
+    label.new(bar_index, high + signal_offset, "Exit BUY @" + str.tostring(close, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.orange,0), textcolor=color.black, style=label.style_label_down, size=size.normal)
+
+if show_exits and exit_sell_normal and is_index
+    label.new(bar_index, low - signal_offset, "Exit SELL @" + str.tostring(close, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.fuchsia,0), textcolor=color.white, style=label.style_label_up, size=size.normal)
+
+if show_exits and exit_buy_forced
+    label.new(bar_index, high + signal_offset, "Exit BUY EOD @" + str.tostring(close, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.yellow,0), textcolor=color.black, style=label.style_label_down, size=size.normal)
+
+if show_exits and exit_sell_forced and is_index
+    label.new(bar_index, low - signal_offset, "Exit SELL EOD @" + str.tostring(close, "#.##"), xloc=xloc.bar_index, yloc=yloc.price,
+         color=color.new(color.yellow,0), textcolor=color.black, style=label.style_label_up, size=size.normal)
+
+// ─────────────────────────────────────────────
+// ALERTS
+// ─────────────────────────────────────────────
+alertcondition(buy_signal,        title="BUY Signal",        message="BUY | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(sell_signal,       title="SELL Signal",       message="SELL | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_buy_target,   title="BUY Target",        message="BUY TARGET | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_sell_target,  title="SELL Target",       message="SELL TARGET | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_buy_trail,    title="Trail Stop BUY",    message="TRAIL STOP BUY | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_sell_trail,   title="Trail Stop SELL",   message="TRAIL STOP SELL | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_buy_early,    title="Exit BUY Early",    message="EXIT BUY EARLY | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_sell_early,   title="Exit SELL Early",   message="EXIT SELL EARLY | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_buy_normal,   title="Exit BUY",          message="EXIT BUY | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_sell_normal,  title="Exit SELL",         message="EXIT SELL | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_buy_forced,   title="Force Exit BUY",    message="FORCE EXIT BUY | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+alertcondition(exit_sell_forced,  title="Force Exit SELL",   message="FORCE EXIT SELL | {{ticker}} @ {{plot(\"SIGNAL_PRICE\")}}")
+
+// ─────────────────────────────────────────────
+// BACKTEST ENGINE
+// ─────────────────────────────────────────────
+in_bt_range = time >= bt_from and time <= bt_to
+
+var int   bt_total_signals  = 0
+var int   bt_target_hits    = 0
+var int   bt_trail_hits     = 0
+var int   bt_profit_no_tgt  = 0
+var int   bt_losing         = 0
+var float bt_total_pts_won  = 0.0
+var float bt_total_pts_lost = 0.0
+
+var array<int>   tlog_day_id    = array.new<int>()
+var array<int>   tlog_entry_ts  = array.new<int>()
+var array<float> tlog_entry_px  = array.new<float>()
+var array<float> tlog_exit_px   = array.new<float>()
+var array<bool>  tlog_is_buy    = array.new<bool>()
+var array<bool>  tlog_hit_tgt   = array.new<bool>()
+var array<bool>  tlog_hit_trail = array.new<bool>()
+var array<bool>  tlog_is_open   = array.new<bool>()
+
+var bool  bt_in_trade        = false
+var bool  bt_trade_is_buy    = false
+var float bt_entry_price     = na
+var float bt_target_price    = na
+var int   bt_entry_time_var  = na
+var int   bt_entry_day_key   = 0
+var int   bt_entry_bar_index = na
+var int   bt_open_log_idx    = na
+
+var float bt_trail_stop_lvl = na
+var bool  bt_trail_active   = false
+var float bt_trail_peak     = na
+
+if barstate.isfirst
+    bt_total_signals  := 0
+    bt_target_hits    := 0
+    bt_trail_hits     := 0
+    bt_profit_no_tgt  := 0
+    bt_losing         := 0
+    bt_total_pts_won  := 0.0
+    bt_total_pts_lost := 0.0
+    bt_in_trade        := false
+    bt_trade_is_buy    := false
+    bt_entry_price     := na
+    bt_target_price    := na
+    bt_entry_time_var  := na
+    bt_entry_day_key   := 0
+    bt_entry_bar_index := na
+    bt_open_log_idx    := na
+    bt_trail_stop_lvl  := na
+    bt_trail_active    := false
+    bt_trail_peak      := na
+    array.clear(tlog_day_id)
+    array.clear(tlog_entry_ts)
+    array.clear(tlog_entry_px)
+    array.clear(tlog_exit_px)
+    array.clear(tlog_is_buy)
+    array.clear(tlog_hit_tgt)
+    array.clear(tlog_hit_trail)
+    array.clear(tlog_is_open)
+
+if in_bt_range and (buy_signal or sell_signal) and not bt_in_trade
+    _range = high - low
+    _wide_threshold = close * (bt_wide_candle_pct / 100.0)
+    _is_wide = _range > _wide_threshold
+    _bt_is_buy = buy_signal
+    _ep = use_discount_entry and _is_wide ?
+         (_bt_is_buy ? (high - _range * bt_wide_entry_fraction)
+                     : (low + _range * bt_wide_entry_fraction))
+         : close
+    _tp = buy_signal ? _ep * (1.0 + bt_target_pct / 100.0) : _ep * (1.0 - bt_target_pct / 100.0)
+
+    bt_entry_price     := _ep
+    bt_target_price    := _tp
+    bt_trade_is_buy    := _bt_is_buy
+    bt_in_trade        := true
+    bt_entry_time_var  := time
+    bt_total_signals   += 1
+    bt_entry_day_key   := year(time, "Asia/Kolkata") * 10000 + month(time, "Asia/Kolkata") * 100 + dayofmonth(time, "Asia/Kolkata")
+    bt_entry_bar_index := bar_index
+    bt_trail_stop_lvl  := na
+    bt_trail_active    := false
+    bt_trail_peak      := na
+
+    if array.size(tlog_entry_px) >= 500
+        array.shift(tlog_day_id)
+        array.shift(tlog_entry_ts)
+        array.shift(tlog_entry_px)
+        array.shift(tlog_exit_px)
+        array.shift(tlog_is_buy)
+        array.shift(tlog_hit_tgt)
+        array.shift(tlog_hit_trail)
+        array.shift(tlog_is_open)
+
+    array.push(tlog_day_id,    bt_entry_day_key)
+    array.push(tlog_entry_ts,  bt_entry_time_var)
+    array.push(tlog_entry_px,  bt_entry_price)
+    array.push(tlog_exit_px,   na)
+    array.push(tlog_is_buy,    bt_trade_is_buy)
+    array.push(tlog_hit_tgt,   false)
+    array.push(tlog_hit_trail, false)
+    array.push(tlog_is_open,   true)
+    bt_open_log_idx := array.size(tlog_entry_px) - 1
+
+bt_bars_after_entry = na(bt_entry_bar_index) ? na : (bar_index - bt_entry_bar_index)
+
+if use_trail_stop and bt_in_trade and not na(bt_bars_after_entry) and bt_bars_after_entry >= 1 and not na(bt_target_price) and not na(bt_entry_price)
+    _bt_trigger_dist = math.abs(bt_target_price - bt_entry_price) * trail_trigger_pct
+    if bt_trade_is_buy
+        _bt_new_peak = na(bt_trail_peak) ? high[1] : math.max(bt_trail_peak, high[1])
+        bt_trail_peak := _bt_new_peak
+        if (_bt_new_peak - bt_entry_price) >= _bt_trigger_dist
+            bt_trail_active := true
+        if bt_trail_active
+            _bt_cand = math.max(bt_entry_price, _bt_new_peak - trail_atr_mult * atr_filter)
+            bt_trail_stop_lvl := na(bt_trail_stop_lvl) ? _bt_cand : math.max(bt_trail_stop_lvl, _bt_cand)
+    else
+        _bt_new_peak = na(bt_trail_peak) ? low[1] : math.min(bt_trail_peak, low[1])
+        bt_trail_peak := _bt_new_peak
+        if (bt_entry_price - _bt_new_peak) >= _bt_trigger_dist
+            bt_trail_active := true
+        if bt_trail_active
+            _bt_cand = math.min(bt_entry_price, _bt_new_peak + trail_atr_mult * atr_filter)
+            bt_trail_stop_lvl := na(bt_trail_stop_lvl) ? _bt_cand : math.min(bt_trail_stop_lvl, _bt_cand)
+
+bt_exit_target_now = bt_in_trade and not na(bt_bars_after_entry) and bt_bars_after_entry >= 1 and
+                     ((bt_trade_is_buy and high >= bt_target_price) or
+                      (not bt_trade_is_buy and low <= bt_target_price))
+
+if bt_exit_target_now
+    bt_target_hits += 1
+    bt_total_pts_won += math.abs(bt_target_price - bt_entry_price)
+    if not na(bt_open_log_idx) and bt_open_log_idx >= 0 and bt_open_log_idx < array.size(tlog_exit_px)
+        array.set(tlog_exit_px,   bt_open_log_idx, bt_target_price)
+        array.set(tlog_hit_tgt,   bt_open_log_idx, true)
+        array.set(tlog_hit_trail, bt_open_log_idx, false)
+        array.set(tlog_is_open,   bt_open_log_idx, false)
+    bt_in_trade        := false
+    bt_entry_price     := na
+    bt_target_price    := na
+    bt_entry_bar_index := na
+    bt_trail_stop_lvl  := na
+    bt_trail_active    := false
+    bt_trail_peak      := na
+    bt_open_log_idx    := na
+
+bt_exit_trail_now = use_trail_stop and bt_in_trade and bt_trail_active and not na(bt_trail_stop_lvl) and not na(bt_bars_after_entry) and bt_bars_after_entry >= 1 and not bt_exit_target_now and ((bt_trade_is_buy and low <= bt_trail_stop_lvl) or (not bt_trade_is_buy and high >= bt_trail_stop_lvl))
+
+if bt_exit_trail_now
+    _trail_exit_px = bt_trail_stop_lvl
+    _trail_pnl = bt_trade_is_buy ? (_trail_exit_px - bt_entry_price) : (bt_entry_price - _trail_exit_px)
+    if _trail_pnl > 0
+        bt_profit_no_tgt += 1
+        bt_total_pts_won += _trail_pnl
+    else
+        bt_losing += 1
+        bt_total_pts_lost += math.abs(_trail_pnl)
+    bt_trail_hits += 1
+    if not na(bt_open_log_idx) and bt_open_log_idx >= 0 and bt_open_log_idx < array.size(tlog_exit_px)
+        array.set(tlog_exit_px,   bt_open_log_idx, _trail_exit_px)
+        array.set(tlog_hit_tgt,   bt_open_log_idx, false)
+        array.set(tlog_hit_trail, bt_open_log_idx, true)
+        array.set(tlog_is_open,   bt_open_log_idx, false)
+    bt_in_trade        := false
+    bt_entry_price     := na
+    bt_target_price    := na
+    bt_entry_bar_index := na
+    bt_trail_stop_lvl  := na
+    bt_trail_active    := false
+    bt_trail_peak      := na
+    bt_open_log_idx    := na
+
+bt_exit_now = bt_in_trade and bar_closed and not bt_exit_target_now and not bt_exit_trail_now and
+              ((bt_trade_is_buy and (exit_buy_early or exit_buy_normal or exit_buy_forced)) or
+               (not bt_trade_is_buy and (exit_sell_early or exit_sell_normal or exit_sell_forced)))
+
+if bt_exit_now
+    _xpx = close
+    _pnl = bt_trade_is_buy ? (_xpx - bt_entry_price) : (bt_entry_price - _xpx)
+    if _pnl > 0
+        bt_profit_no_tgt += 1
+        bt_total_pts_won += _pnl
+    else
+        bt_losing += 1
+        bt_total_pts_lost += math.abs(_pnl)
+    if not na(bt_open_log_idx) and bt_open_log_idx >= 0 and bt_open_log_idx < array.size(tlog_exit_px)
+        array.set(tlog_exit_px,   bt_open_log_idx, _xpx)
+        array.set(tlog_hit_tgt,   bt_open_log_idx, false)
+        array.set(tlog_hit_trail, bt_open_log_idx, false)
+        array.set(tlog_is_open,   bt_open_log_idx, false)
+    bt_in_trade        := false
+    bt_entry_price     := na
+    bt_target_price    := na
+    bt_entry_bar_index := na
+    bt_trail_stop_lvl  := na
+    bt_trail_active    := false
+    bt_trail_peak      := na
+    bt_open_log_idx    := na
+
+if time > bt_to and bt_in_trade and bar_closed
+    _xpx2 = close
+    _pnl2 = bt_trade_is_buy ? (_xpx2 - bt_entry_price) : (bt_entry_price - _xpx2)
+    if _pnl2 > 0
+        bt_profit_no_tgt += 1
+        bt_total_pts_won += _pnl2
+    else
+        bt_losing += 1
+        bt_total_pts_lost += math.abs(_pnl2)
+    if not na(bt_open_log_idx) and bt_open_log_idx >= 0 and bt_open_log_idx < array.size(tlog_exit_px)
+        array.set(tlog_exit_px,   bt_open_log_idx, _xpx2)
+        array.set(tlog_hit_tgt,   bt_open_log_idx, false)
+        array.set(tlog_hit_trail, bt_open_log_idx, false)
+        array.set(tlog_is_open,   bt_open_log_idx, false)
+    bt_in_trade        := false
+    bt_entry_bar_index := na
+    bt_trail_stop_lvl  := na
+    bt_trail_active    := false
+    bt_trail_peak      := na
+    bt_open_log_idx    := na
+
+// ─────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────
+bt_total_trades = bt_target_hits + bt_profit_no_tgt + bt_losing
+bt_net_pts      = bt_total_pts_won - bt_total_pts_lost
+bt_win_rate     = bt_total_trades > 0 ? (bt_target_hits + bt_profit_no_tgt) / bt_total_trades * 100.0 : 0.0
+
+var table bt_table = na
+if barstate.islast and show_bt_dashboard
+    bt_table := table.new(position.bottom_right, 2, 11,
+         border_width=1, border_color=color.new(color.gray,60),
+         frame_width=2, frame_color=color.new(color.aqua,40))
+    table.cell(bt_table,0,0,"BrahmAstra", text_color=color.white, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,1,0,str.format("{0,date,dd MMM yyyy}",bt_from)+" to "+str.format("{0,date,dd MMM yyyy}",bt_to), text_color=color.silver, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,1,"Signals", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,1,str.tostring(bt_total_signals), text_color=color.yellow, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,2,"Trades", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,2,str.tostring(bt_total_trades), text_color=color.yellow, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,3,"Target Hits", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,3,str.tostring(bt_target_hits), text_color=color.lime, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,4,"Trail Stops", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,4,str.tostring(bt_trail_hits), text_color=color.new(color.orange,0), bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,5,"Profit Trades", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,5,str.tostring(bt_profit_no_tgt), text_color=color.green, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,6,"Losing Trades", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,6,str.tostring(bt_losing), text_color=color.red, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,7,"Win Rate", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,7,str.tostring(bt_win_rate,"#.##")+"%", text_color=bt_win_rate >= 45 ? color.lime : bt_win_rate >= 35 ? color.yellow : color.red, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,8,"Points Won", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,8,str.tostring(bt_total_pts_won,"#.##"), text_color=color.lime, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,9,"Points Lost", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,9,str.tostring(bt_total_pts_lost,"#.##"), text_color=color.red, bgcolor=color.new(color.black,0))
+    table.cell(bt_table,0,10,"Net Points", text_color=color.silver, bgcolor=color.new(color.navy,30))
+    table.cell(bt_table,1,10,(bt_net_pts>=0?"+":"-")+str.tostring(math.abs(bt_net_pts),"#.##"), text_color=bt_net_pts>=0?color.lime:color.red, bgcolor=color.new(color.black,0))
+
+// ─────────────────────────────────────────────
+// LAST-DAY TRADE LOG
+// ─────────────────────────────────────────────
+var table tlog_table = na
+if barstate.islast and show_bt_trade_log
+    _n = array.size(tlog_entry_px)
+    _uniq_days = array.new<int>()
+    _uniq_day_ts = array.new<int>()
+    if _n > 0
+        for _i = 0 to _n - 1
+            _dk = array.get(tlog_day_id, _i)
+            _ulen = array.size(_uniq_days)
+            _already = false
+            if _ulen > 0
+                for _j = 0 to _ulen - 1
+                    if array.get(_uniq_days, _j) == _dk
+                        _already := true
+            if not _already
+                array.push(_uniq_days, _dk)
+                array.push(_uniq_day_ts, array.get(tlog_entry_ts, _i))
+
+    _total_days = array.size(_uniq_days)
+    _has_day = _total_days > 0
+    _last_day_key = _has_day ? array.get(_uniq_days, _total_days - 1) : na
+    _last_day_ts  = _has_day ? array.get(_uniq_day_ts, _total_days - 1) : na
+
+    _today_key    = year(timenow, "Asia/Kolkata") * 10000 + month(timenow, "Asia/Kolkata") * 100 + dayofmonth(timenow, "Asia/Kolkata")
+    _last_bar_key = year(time,    "Asia/Kolkata") * 10000 + month(time,    "Asia/Kolkata") * 100 + dayofmonth(time,    "Asia/Kolkata")
+
+    int _display_day_key = na
+    int _display_day_ts  = na
+
+    if _has_day
+        if _last_bar_key == _today_key
+            _found_today = false
+            for _ti = 0 to _n - 1
+                if array.get(tlog_day_id, _ti) == _today_key
+                    _display_day_key := _today_key
+                    _display_day_ts  := array.get(tlog_entry_ts, _ti)
+                    _found_today := true
+                    break
+            if not _found_today
+                _display_day_key := _today_key
+                _display_day_ts  := time
+        else
+            _display_day_key := _last_day_key
+            _display_day_ts  := _last_day_ts
+
+    _display_trade_count = 0
+    if not na(_display_day_key) and _n > 0
+        for _ti = 0 to _n - 1
+            if array.get(tlog_day_id, _ti) == _display_day_key
+                _display_trade_count += 1
+
+    _has_display_day = not na(_display_day_key)
+    _trows = _has_display_day ? (2 + math.max(_display_trade_count, 1)) : 2
+
+    if not na(tlog_table)
+        table.delete(tlog_table)
+    tlog_table := table.new(position.top_right, 2, _trows,
+         border_width=1, border_color=color.new(color.gray,60),
+         frame_width=2, frame_color=color.new(color.blue,40))
+    table.cell(tlog_table, 0, 0, "Trade Log — Current / Last Trading Day", text_color=color.white, bgcolor=color.new(color.black,0))
+    table.cell(tlog_table, 1, 0, "Exit @ Price (Result)", text_color=color.white, bgcolor=color.new(color.black,0))
+
+    if _has_display_day
+        _row = 1
+        _is_today_display = _display_day_key == _today_key
+        _dlbl = (_is_today_display ? "Today - " : "Last Trading Day - ") + str.format("{0,date,dd MMM yyyy}", _display_day_ts)
+        table.cell(tlog_table, 0, _row, _dlbl, text_color=color.green, bgcolor=color.new(color.navy,10))
+        table.cell(tlog_table, 1, _row, _display_trade_count > 0 ? ("Trades: " + str.tostring(_display_trade_count)) : "No trades yet", text_color=color.silver, bgcolor=color.new(color.navy,10))
+        _row += 1
+
+        if _display_trade_count > 0
+            _tnum = 0
+            for _ti = _n - 1 to 0
+                if array.get(tlog_day_id, _ti) == _display_day_key
+                    _ep    = array.get(tlog_entry_px,  _ti)
+                    _xp    = array.get(tlog_exit_px,   _ti)
+                    _buy   = array.get(tlog_is_buy,    _ti)
+                    _hit   = array.get(tlog_hit_tgt,   _ti)
+                    _trail = array.get(tlog_hit_trail, _ti)
+                    _open  = array.get(tlog_is_open,   _ti)
+
+                    _dir  = _buy ? "Buy" : "Sell"
+                    _etxt = "Trade " + str.tostring(_display_trade_count - _tnum) + ": " + _dir + " @ " + str.tostring(_ep, "#.##")
+
+                    if _open or na(_xp)
+                        table.cell(tlog_table, 0, _row, _etxt, text_color=color.white, bgcolor=color.new(color.blue,82))
+                        table.cell(tlog_table, 1, _row, "Open", text_color=color.yellow, bgcolor=color.new(color.blue,82))
+                    else
+                        _pnl = _buy ? _xp - _ep : _ep - _xp
+                        _pnl_txt = (_pnl > 0 ? "+" : _pnl < 0 ? "-" : "") + str.tostring(math.abs(_pnl), "#.##")
+                        _res = _hit ? "TARGET" : _trail ? "TRAIL" : _pnl > 0 ? "WIN" : _pnl < 0 ? "LOSS" : "FLAT"
+                        _bg = _hit ? color.new(color.green, 78) :
+                              _trail ? (_pnl >= 0 ? color.new(color.teal, 78) : color.new(color.orange, 76)) :
+                              _pnl > 0 ? color.new(color.lime, 84) :
+                              _pnl < 0 ? color.new(color.red, 82) : color.new(color.gray, 82)
+                        _tc = _hit ? color.lime :
+                              _trail ? (_pnl >= 0 ? color.aqua : color.orange) :
+                              _pnl > 0 ? color.lime :
+                              _pnl < 0 ? color.red : color.silver
+
+                        table.cell(tlog_table, 0, _row, _etxt, text_color=_tc, bgcolor=_bg)
+                        table.cell(tlog_table, 1, _row, "Exit @ " + str.tostring(_xp, "#.##") + " | " + _res + " | P&L " + _pnl_txt, text_color=_tc, bgcolor=_bg)
+
+                    _row += 1
+                    _tnum += 1
+        else
+            table.cell(tlog_table, 0, _row, _is_today_display ? "No trades yet today" : "No trades found for selected day", text_color=color.silver, bgcolor=color.new(color.navy,10))
+            table.cell(tlog_table, 1, _row, "", bgcolor=color.new(color.navy,10))
+    else
+        table.cell(tlog_table, 0, 1, "No trade log data", text_color=color.silver, bgcolor=color.new(color.navy,10))
+        table.cell(tlog_table, 1, 1, "", bgcolor=color.new(color.navy,10))
