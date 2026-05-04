@@ -55,6 +55,31 @@ export default function App() {
     if (saved.length > 0) setSignals(saved);
   };
 
+  // Scans the notification tray for any signals missed while app was in background.
+  // More reliable than background task alone — Android OS can throttle background tasks.
+  const syncFromNotificationTray = async () => {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    if (presented.length === 0) return;
+
+    const stored = await Storage.loadSignals();
+    const storedIds = new Set(stored.map((s) => s.id));
+
+    let changed = false;
+    for (const notif of presented) {
+      const data = notif.request.content.data as Record<string, any>;
+      const signal = parseSignalFromNotification(data);
+      if (signal && !storedIds.has(signal.id)) {
+        stored.unshift(signal);
+        storedIds.add(signal.id);
+        changed = true;
+      }
+    }
+
+    if (changed) await Storage.saveSignals(stored.slice(0, 50));
+    const final = await Storage.loadSignals();
+    if (final.length > 0) setSignals(final);
+  };
+
   // Restore session on launch
   useEffect(() => {
     (async () => {
@@ -68,8 +93,9 @@ export default function App() {
         if (result.success) setLoggedIn(true);
       }
 
-      // Load signals saved by background task
+      // Load persisted signals then also scan tray for anything missed
       await loadSignalsFromStorage();
+      await syncFromNotificationTray();
 
       const token = await registerForPushNotifications();
       if (token) {
@@ -80,10 +106,13 @@ export default function App() {
     })();
   }, []);
 
-  // Reload signals from storage when app comes back to foreground
+  // When app comes back to foreground: reload from storage + scan notification tray
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      if (nextState === 'active') loadSignalsFromStorage();
+      if (nextState === 'active') {
+        loadSignalsFromStorage();
+        syncFromNotificationTray();
+      }
     });
     return () => sub.remove();
   }, []);
